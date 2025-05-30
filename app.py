@@ -17,7 +17,16 @@ def chat():
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": message}]
+            messages=[
+                {
+                    "role": "system",
+                    "content": "אתה יועץ קולנוע חכם. תמליץ על סרטים לפי סגנון, סרטים קודמים שהמשתמש אהב, ז'אנר, או מצב רוח. כל תשובה תכלול שם הסרט, שנה, ז'אנר ותקציר קצר בסגנון נעים ובהיר."
+                },
+                {
+                    "role": "user",
+                    "content": message
+                }
+            ]
         )
         return jsonify({"response": response.choices[0].message.content})
     except Exception as e:
