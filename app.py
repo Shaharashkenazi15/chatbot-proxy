@@ -47,9 +47,6 @@ def chat():
         else:
             filtered = df.sort_values(by="Rating", ascending=False)
 
-        top = filtered.head(5)
-        movie_list = top[['Series_Title', 'Released_Year', 'Genre', 'Rating', 'Overview']].to_string(index=False)
-
         user_prompt = (
             f"המשתמש כתב: {message}\n\n"
             f"הנה רשימת הסרטים מתוך הקובץ:\n\n{movie_list}\n\n"
