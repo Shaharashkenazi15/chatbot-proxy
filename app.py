@@ -17,27 +17,49 @@ except Exception as e:
     print("⚠️ שגיאה בטעינת קובץ הסרטים:", e)
     df = pd.DataFrame()
 
+# מילות מפתח לזיהוי בקשה לסרט
+movie_keywords = [
+    "סרט", "המלצה", "קומדיה", "דרמה", "אקשן", "מותחן", "מפחיד", "מתח",
+    "מרגש", "עצב", "שמח", "עצוב", "סיפור אמיתי", "מבוסס", "קליל",
+    "טרגדיה", "מרומם", "בא לי", "תן לי משהו", "תרגש אותי", "סרט כבד"
+]
+
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.get_json()
     message = data.get("message", "")
     print("📩 שאלה מהמשתמש:", message)
 
-    # סינון לפי ז'אנר – מילים נפוצות
-    if "דרמה" in message:
-        filtered = df[df["Genre"].str.contains("Drama", case=False)]
-    elif "אקשן" in message:
-        filtered = df[df["Genre"].str.contains("Action", case=False)]
-    elif "קומדיה" in message:
-        filtered = df[df["Genre"].str.contains("Comedy", case=False)]
+    # זיהוי אם מדובר בשאלה על סרט
+    is_movie_question = any(word in message for word in movie_keywords)
+
+    if is_movie_question:
+        # סינון לפי ז'אנר או הקשר רגשי
+        if any(word in message for word in ["דרמה", "מרגש", "כבד", "לבכות"]):
+            filtered = df[df["Genre"].str.contains("Drama", case=False)]
+
+        elif any(word in message for word in ["אקשן", "מתח", "מפחיד", "מותחן"]):
+            filtered = df[df["Genre"].str.contains("Action|Thriller|Horror", case=False)]
+
+        elif any(word in message for word in ["קומדיה", "צחוק", "קליל", "שמח", "אני עצוב", "באסה", "מעונן", "דיכאון"]):
+            filtered = df[df["Genre"].str.contains("Comedy", case=False)]
+
+        else:
+            filtered = df.sort_values(by="Rating", ascending=False)
+
+        top = filtered.head(5)
+        movie_list = top[['Series_Title', 'Released_Year', 'Genre', 'Rating', 'Overview']].to_string(index=False)
+
+        user_prompt = (
+            f"המשתמש כתב: {message}\n\n"
+            f"הנה רשימת הסרטים מתוך הקובץ:\n\n{movie_list}\n\n"
+            "אם זו בקשה לסרט – בחר סרט מתאים מהרשימה והמלץ עליו לפי ההנחיות."
+        )
     else:
-        filtered = df.sort_values(by="Rating", ascending=False)
-
-    # קח עד 5 סרטים רלוונטיים
-    top = filtered.head(5)
-
-    # רשימת סרטים בפורמט טקסט
-    movie_list = top[['Series_Title', 'Released_Year', 'Genre', 'Rating', 'Overview']].to_string(index=False)
+        user_prompt = (
+            f"המשתמש כתב: {message}\n\n"
+            "זו שאלה כללית. אנא ענה בצורה ידידותית, בלי להציע סרטים."
+        )
 
     try:
         response = openai.ChatCompletion.create(
@@ -59,12 +81,7 @@ def chat():
                 },
                 {
                     "role": "user",
-                    "content": (
-                        f"המשתמש כתב: {message}\n\n"
-                        f"הנה רשימת הסרטים מתוך הקובץ:\n\n{movie_list}\n\n"
-                        "אם זו בקשה לסרט – בחר סרט מתאים מהרשימה והמלץ עליו לפי ההנחיות. "
-                        " אם זו שאלה כללית – תענה בהתאם.,ובידידות - והסבר שאתה יועץ סרטים"
-                    )
+                    "content": user_prompt
                 }
             ]
         )
