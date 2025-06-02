@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import openai
 import os
 import pandas as pd
+import random
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -20,33 +21,53 @@ except Exception as e:
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.get_json()
-    messages = data.get("messages", [])
+    user_message = data.get("message", "")
 
-    # נוודא שהשיחה כוללת לפחות שורת system אחת, ואם לא – נוסיף
-    if not any(msg.get("role") == "system" for msg in messages):
-        messages.insert(0, {
-            "role": "system",
-            "content": (
-                "אתה עוזר אישי חכם שממליץ על סרטים בלבד מתוך טבלת סרטים שנשלחת אליך. "
-                "אם המשתמש שואל על סרטים – ענה רק לפי הסרטים שמופיעים בטבלה. "
-                "אל תמציא שמות סרטים, תקצירים או פרטים שלא קיימים. "
-                "אם אין סרט מתאים – הסבר זאת בקצרה והצע סרט כללי מתוך הטבלה עם דירוג גבוה. "
-                "אם התקציר באנגלית – תרגם אותו לעברית. "
-                "שם הסרט תמיד יופיע באנגלית בלבד. אל תתייחס לסדרות טלוויזיה. "
-                "אם השאלה כללית – כמו 'מה שלומך?' או 'תספר בדיחה' – תגיב בצורה נעימה וידידותית. "
-                "ענה תמיד בעברית, בצורה קצרה, קלילה וברורה, כאילו אתה חבר טוב שממליץ על סרט."
-            )
-        })
-
+    # שלב 1: בקש מ-GPT לסווג את השאלה
     try:
-        response = openai.ChatCompletion.create(
+        gpt_response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
-            messages=messages
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "אתה מסווג בקשות לסרטים. "
+                        "ענה רק בז'אנר אחד או מילת מפתח שמתארת את סוג הסרט שהמשתמש רוצה "
+                        "(למשל: קומדיה, דרמה, אקשן, מרגש, מותחן, קליל, מפחיד). "
+                        "אל תמליץ על סרט, אל תסביר, רק כתוב את הסיווג."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": user_message
+                }
+            ]
         )
-        return jsonify({"response": response.choices[0].message.content})
+        category = gpt_response.choices[0].message.content.strip()
+        print("🎯 קטגוריה ש-GPT זיהה:", category)
     except Exception as e:
         print("⚠️ שגיאה בתקשורת עם OpenAI:", e)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "שגיאה בזיהוי הבקשה"}), 500
+
+    # שלב 2: חפש סרט מתאים בקובץ
+    filtered = df[df["Genre"].str.contains(category, case=False, na=False)]
+
+    if filtered.empty:
+        selected = df.sample(n=1).iloc[0]
+        note = f"לא נמצאו סרטים בז'אנר '{category}', מוצג סרט אקראי אחר:\n"
+    else:
+        selected = filtered.sample(n=1).iloc[0]
+        note = ""
+
+    # שלב 3: בנה תגובה
+    final_text = (
+        f"{note}"
+        f"🎬 ממליץ על הסרט: **{selected['Series_Title']}** ({selected['Released_Year']})\n"
+        f"ז'אנר: {selected['Genre']} | דירוג: {selected['Rating']}\n"
+        f"{selected['Overview']}"
+    )
+
+    return jsonify({"response": final_text})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
