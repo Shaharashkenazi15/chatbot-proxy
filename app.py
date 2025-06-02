@@ -9,8 +9,12 @@ CORS(app)
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# טען את קובץ הסרטים
-df = pd.read_csv("movies.csv")
+# טען את קובץ הסרטים עם טיפול בשגיאה
+try:
+    df = pd.read_csv("movies.csv")
+except Exception as e:
+    print("⚠️ שגיאה בטעינת קובץ הסרטים:", e)
+    df = pd.DataFrame()
 
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -18,10 +22,10 @@ def chat():
     message = data.get("message", "")
     print("📩 שאלה מהמשתמש:", message)
 
-    # סינון בסיסי לפי ז'אנר – לפי מילים נפוצות בהודעה
+    # סינון לפי ז'אנר – מילים נפוצות
     if "דרמה" in message:
         filtered = df[df["Genre"].str.contains("Drama", case=False)]
-    elif "אקשן" in message or "אקשן" in message:
+    elif "אקשן" in message:
         filtered = df[df["Genre"].str.contains("Action", case=False)]
     elif "קומדיה" in message:
         filtered = df[df["Genre"].str.contains("Comedy", case=False)]
@@ -31,13 +35,8 @@ def chat():
     # קח עד 5 סרטים רלוונטיים
     top = filtered.head(5)
 
-    # בנה רשימת סרטים לשליחה ל-GPT
+    # רשימת סרטים בפורמט טקסט
     movie_list = top[['Series_Title', 'Released_Year', 'Genre', 'Rating', 'Overview']].to_string(index=False)
-    prompt = (
-        f"המשתמש ביקש המלצה על סרט. הנה מידע מתוך מאגר הסרטים שלנו:\n\n"
-        f"{movie_list}\n\n"
-        "בחר סרט אחד שמתאים לבקשה, והמלץ עליו בצורה מעניינת. כלול את שם הסרט, שנה, ז'אנר, דירוג ותקציר. אל תמציא מידע חדש."
-    )
 
     try:
         response = openai.ChatCompletion.create(
@@ -45,17 +44,26 @@ def chat():
             messages=[
                 {
                     "role": "system",
-                    "content": "ענה אך ורק על סמך הסרטים שנשלחו אליך. אל תמציא שמות או מידע שלא מופיע בטבלה."
+                    "content": (
+                        "אתה יועץ סרטים חכם. ענה תמיד בעברית, בצורה ידידותית, תמציתית ובגובה העיניים. "
+                        "ענה רק לפי הסרטים שבטבלה. "
+                        "אם התקציר באנגלית – תרגם אותו לעברית כחלק מההמלצה. "
+                        "בחר סרט אחד בלבד מתוך הרשימה."
+                    )
                 },
                 {
                     "role": "user",
-                    "content": prompt
+                    "content": (
+                        f"המשתמש ביקש: {message}\n\n"
+                        f"הנה רשימת הסרטים:\n\n{movie_list}\n\n"
+                        "בחר סרט אחד שמתאים לבקשה, והמלץ עליו בצורה קלילה וקצרה – כולל שם הסרט, שנה, ז'אנר, דירוג ותקציר בעברית."
+                    )
                 }
             ]
         )
         return jsonify({"response": response.choices[0].message.content})
     except Exception as e:
-        print("⚠️ שגיאה:", e)
+        print("⚠️ שגיאה בתקשורת עם OpenAI:", e)
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
