@@ -67,18 +67,27 @@ def chat():
         selected_movies = high_rating_df.sample(n=num_movies)
 
     movies_text = ""
-    for m in selected_movies[['Series_Title', 'Released_Year', 'Genre', 'Rating', 'Overview']].to_dict(orient='records'):
-        movies_text += f"{m['Series_Title']} ({m['Released_Year']}), ז'אנר: {m['Genre']}, דירוג: {m['Rating']}\nתקציר: {m['Overview']}\n\n"
+    for m in selected_movies[['Series_Title', 'Released_Year', 'Genre', 'Rating', 'Overview', 'Star1', 'Runtime']].to_dict(orient='records'):
+        # טיפול בערכים חסרים
+        star1 = m['Star1'] if pd.notna(m['Star1']) else "לא ידוע"
+        runtime = f"{m['Runtime']} דקות" if pd.notna(m['Runtime']) else "לא ידוע"
+        
+        movies_text += (
+            f"{m['Series_Title']} – {m['Released_Year']}\n"
+            f"תקציר: {m['Overview']}\n"
+            f"שחקן ראשי: {star1}\n"
+            f"ז'אנר: {m['Genre']}\n"
+            f"אורך: {runtime}\n\n"
+        )
 
     prompt = (
-    f"המשתמש כתב: {user_message} (מצב רוח: {detect_mood(user_message)})\n\n"
-    f"הנה רשימת הסרטים:\n\n{movies_text}\n\n"
-    f"בחר {num_movies} סרטים שמתאימים לבקשה ולמצב הרוח של המשתמש. "
-    f"ענה בעברית בלבד, בצורה חמה וחברית. עבור כל סרט כתוב את כל המידע בפסקה אחת רציפה וברורה, "
-    f"כולל שם הסרט באנגלית, שנה, ז'אנר, דירוג, תקציר באנגלית, ומשפט הסבר למה בחרת דווקא אותו. "
-    f"אל תשתמש במספרים, כותרות או רשימות ממוספרות. "
-    f"הפרד בין סרט לסרט על ידי שורה ריקה בלבד. "
-    f"אל תמציא סרטים – השתמש רק באלו שסיפקתי."
+        f"המשתמש כתב: {user_message} (מצב רוח: {detect_mood(user_message)})\n\n"
+        f"הנה רשימת הסרטים:\n\n{movies_text}\n\n"
+        f"בחר {num_movies} סרטים שמתאימים לבקשה ולמצב הרוח של המשתמש. "
+        f"ענה בעברית בלבד, בצורה חמה וחברית. עבור כל סרט כתוב את כל המידע בפסקה אחת רציפה וברורה, "
+        f"כולל שם הסרט באנגלית, שנה, ז'אנר, תקציר, שחקן ראשי ואורך הסרט. "
+        f"הפרד בין סרט לסרט על ידי שורה ריקה בלבד. "
+        f"אל תמציא סרטים – השתמש רק באלו שסיפקתי."
     )
 
     try:
