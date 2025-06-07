@@ -19,17 +19,17 @@ except Exception as e:
     df = pd.DataFrame()
 
 general_phrases = ["שלום", "מה נשמע", "מה קורה", "מה שלומך", "היי", "אהלן"]
-recommendation_keywords = ["תמליץ", "סרטים", "מה לראות", "סרט", "ממליץ"]
+recommendation_keywords = ["תמליץ", "סרטים", "מה לראות", "סרט", "ממליץ", "מומלץ", "רוצה לראות"]
 
 def detect_mood(message):
     message = message.lower()
-    if any(word in message for word in ["רע","עצוב", "בדיכאון", "בוכה"]):
+    if any(word in message for word in ["רע", "עצוב", "בדיכאון", "בוכה", "נורא"]):
         return "עצוב"
-    if any(word in message for word in ["כועס", "עצבני", "מתוסכל"]):
+    if any(word in message for word in ["כועס", "עצבני", "מתוסכל", "מרוגז"]):
         return "כועס"
-    if any(word in message for word in ["כיף","שמח", "מאושר", "טוב לי"]):
+    if any(word in message for word in ["כיף", "שמח", "מאושר", "טוב לי", "מצוין"]):
         return "שמח"
-    if any(word in message for word in ["לחוץ", "חרד", "עומס"]):
+    if any(word in message for word in ["לחוץ", "חרד", "עומס", "בלחץ"]):
         return "לחוץ"
     return "רגיל"
 
@@ -39,8 +39,27 @@ def extract_number_of_movies(message):
         return min(int(match.group(1)), 5)
     return 1
 
+def build_movies_text(df_movies):
+    movies_text = ""
+    for m in df_movies[['Series_Title', 'Released_Year', 'Genre', 'Rating', 'Overview', 'Star1', 'Runtime']].to_dict(orient='records'):
+        star1 = m['Star1'] if pd.notna(m['Star1']) else "לא ידוע"
+        runtime = re.search(r'\d+', str(m['Runtime']))
+        runtime = f"{runtime.group()} דקות" if runtime else "לא ידוע"
+
+        movies_text += (
+            f"{m['Series_Title']} – {m['Released_Year']}\n"
+            f"תקציר: {m['Overview']}\n"
+            f"שחקן ראשי: {star1}\n"
+            f"ז'אנר: {m['Genre']}\n"
+            f"אורך: {runtime}\n\n"
+        )
+    return movies_text
+
 @app.route("/chat", methods=["POST"])
 def chat():
+    if df.empty:
+        return jsonify({"response": "לא ניתן לטעון את רשימת הסרטים כרגע. נסה שוב מאוחר יותר."}), 500
+
     data = request.get_json()
     messages = data.get("messages", [])
     user_message = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "").lower()
@@ -61,30 +80,19 @@ def chat():
 
     if len(high_rating_df) < num_movies:
         needed = num_movies - len(high_rating_df)
-        other_movies = df[~df.index.isin(high_rating_df.index)]
-        selected_movies = pd.concat([high_rating_df, other_movies.sample(n=needed)])
+        other_movies = df[~df.index.isin(high_rating_df.index)].sample(n=needed)
+        selected_movies = pd.concat([high_rating_df, other_movies]).sample(n=num_movies)
     else:
         selected_movies = high_rating_df.sample(n=num_movies)
 
-    movies_text = ""
-    for m in selected_movies[['Series_Title', 'Released_Year', 'Genre', 'Rating', 'Overview', 'Star1', 'Runtime']].to_dict(orient='records'):
-        # טיפול בערכים חסרים
-        star1 = m['Star1'] if pd.notna(m['Star1']) else "לא ידוע"
-        runtime = f"{m['Runtime']} דקות" if pd.notna(m['Runtime']) else "לא ידוע"
-        
-        movies_text += (
-            f"{m['Series_Title']} – {m['Released_Year']}\n"
-            f"תקציר: {m['Overview']}\n"
-            f"שחקן ראשי: {star1}\n"
-            f"ז'אנר: {m['Genre']}\n"
-            f"אורך: {runtime}\n\n"
-        )
+    movies_text = build_movies_text(selected_movies)
+    mood = detect_mood(user_message)
 
     prompt = (
-        f"המשתמש כתב: {user_message} (מצב רוח: {detect_mood(user_message)})\n\n"
+        f"המשתמש כתב: {user_message} (מצב רוח: {mood})\n\n"
         f"הנה רשימת הסרטים:\n\n{movies_text}\n\n"
         f"בחר סרטים שמתאימים לבקשה ולמצב הרוח של המשתמש. "
-        f"ענה בעברית ,בצורה חמה וחברית. עבור כל סרט כתוב את כל המידע בפסקה אחת רציפה וברורה, "
+        f"ענה בעברית בצורה חמה וחברית. עבור כל סרט כתוב את כל המידע בפסקה אחת רציפה וברורה, "
         f"כולל שם הסרט באנגלית בלבד, שנה, ז'אנר, תקציר באנגלית בלבד, שחקן ראשי ואורך הסרט. "
         f"הפרד בין סרט לסרט על ידי שורה ריקה בלבד. "
         f"תסביר למה דווקא בחרת בסרט הזה בצורה חמה וידידותית. "
@@ -93,22 +101,20 @@ def chat():
 
     try:
         response = openai.ChatCompletion.create(
-            temperature=0,
+            temperature=0.7,
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": (
-                    "ענה בעברית, אבל הצג את שם הסרט והתקציר שלו באנגלית בלבד. "
-                    "הצג כל סרט כבלוק עצמאי עם כל המידע הבא: "
-                    "שם הסרט (באנגלית בלבד), שנת יציאה, ז'אנר, תקציר באנגלית בלבד, שחקן ראשי, ואורך הסרט בדקות. "
-                    "הוסף הסבר חם וידידותי למה בחרת בכל סרט. אל תמציא סרטים או מידע – השתמש רק ברשימת הסרטים שסופקה. "
-                    "הצג כל סרט כבלוק ברור, והפרד בין סרטים על ידי שורה ריקה בלבד."
-                )}
+                    "ענה בעברית בצורה חמה וחברית. "
+                    "עבור כל סרט כתוב פסקה אחת שמכילה: "
+                    "שם הסרט באנגלית בלבד, שנת יציאה, ז'אנר, תקציר באנגלית בלבד, שחקן ראשי ואורך הסרט. "
+                    "אל תמציא מידע או סרטים – השתמש רק ברשימה שסופקה. "
+                    "הצג כל סרט כבלוק עצמאי, והפרד בין סרטים בעזרת שורה ריקה בלבד."
+                )},
                 {"role": "user", "content": prompt}
             ]
         )
-        raw_response = response.choices[0].message.content
-
-        return jsonify({"response": raw_response})
+        return jsonify({"response": response.choices[0].message.content})
 
     except Exception as e:
         print("⚠️ שגיאה:", e)
