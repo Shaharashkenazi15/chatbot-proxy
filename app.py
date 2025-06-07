@@ -98,4 +98,5 @@ def chat():
     return jsonify({"response": answer})
 
 if __name__ == "__main__":
-    app.run(debug=os.getenv("FLASK_DEBUG", "False") == "True")
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
