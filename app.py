@@ -64,3 +64,8 @@ def chat():
     except Exception as e:
         print("⚠️ שגיאה:", e)
         return jsonify({"response": "אירעה שגיאה בעת עיבוד ההמלצה. נסה שוב מאוחר יותר."}), 500
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)        
+
+
