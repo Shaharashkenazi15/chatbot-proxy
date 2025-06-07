@@ -57,15 +57,14 @@ def chat():
     if said_greeting and wants_recommendation:
         num_movies = max(num_movies, 3)
 
-    # בחר סרטים עם דירוג גבוה או דגימה מהשאר
     high_rating_df = df[df['Rating'] >= 8.5]
 
     if len(high_rating_df) < num_movies:
         needed = num_movies - len(high_rating_df)
         other_movies = df[~df.index.isin(high_rating_df.index)]
-        selected_movies = pd.concat([high_rating_df, other_movies.sample(n=needed, random_state=42)])
+        selected_movies = pd.concat([high_rating_df, other_movies.sample(n=needed)])
     else:
-        selected_movies = high_rating_df.sample(n=num_movies, random_state=42)
+        selected_movies = high_rating_df.sample(n=num_movies)
 
     movies_text = ""
     for m in selected_movies[['Series_Title', 'Released_Year', 'Genre', 'Rating', 'Overview']].to_dict(orient='records'):
@@ -78,24 +77,24 @@ def chat():
         f"ענה בעברית בלבד, בצורה חמה וחברית. עבור כל סרט כתוב:\n"
         f"1. שם הסרט באנגלית\n2. שנה\n3. ז'אנר\n4. דירוג\n5. תקציר בעברית\n6. משפט הסבר למה בחרת דווקא אותו.\n"
         f"תכתוב כל סרט כבלוק נפרד, ללא הקדמות או סיכומים כלליים. רק הרשימה.\n"
-        f"אם אין בקשת המלצה, ענה באופן כללי וידידותי."
+        f"אל תמציא סרטים – השתמש רק באלה שסיפקתי."
     )
 
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
+            model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "אתה עוזר שממליץ על סרטים בעברית מתוך רשימה שניתנה."},
+                {"role": "system", "content": "ענה בעברית בלבד. הצג כל סרט כבלוק עצמאי. אל תמציא מידע."},
                 {"role": "user", "content": prompt}
-            ],
-            max_tokens=500,
-            temperature=0.7,
+            ]
         )
-        answer = response.choices[0].message.content.strip()
-    except Exception as e:
-        answer = "מצטער, קרתה שגיאה בשרת. אנא נסה שוב."
+        raw_response = response.choices[0].message.content
 
-    return jsonify({"response": answer})
+        return jsonify({"response": raw_response})
+
+    except Exception as e:
+        print("⚠️ שגיאה:", e)
+        return jsonify({"response": "אירעה שגיאה בעת עיבוד ההמלצה. נסה שוב מאוחר יותר."}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
