@@ -48,7 +48,7 @@ def chat():
     wants_recommendation = any(k in user_message for k in recommendation_keywords)
     said_greeting = any(p in user_message for p in general_phrases)
 
-    if said_greeting and not wants_recommendation:
+if said_greeting and not wants_recommendation:
     return jsonify({
         "response": "שלום! אני אשמח להמליץ לך על סרטים. כתוב לי איך אתה מרגיש או איזה סוג סרט בא לך לראות."
     })
