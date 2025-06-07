@@ -81,7 +81,7 @@ prompt = (
     f"הפרד בין סרט לסרט עם שורה ריקה בלבד. אל תשתמש במספרים או כותרות."
 )
 
-    try:
+        try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
