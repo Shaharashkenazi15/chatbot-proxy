@@ -78,4 +78,24 @@ def chat():
         f"ענה בעברית בלבד, בצורה חמה וחברית. עבור כל סרט כתוב:\n"
         f"1. שם הסרט באנגלית\n2. שנה\n3. ז'אנר\n4. דירוג\n5. תקציר בעברית\n6. משפט הסבר למה בחרת דווקא אותו.\n"
         f"תכתוב כל סרט כבלוק נפרד, ללא הקדמות או סיכומים כלליים. רק הרשימה.\n"
-        f"
+        f"אם אין בקשת המלצה, ענה באופן כללי וידידותי."
+    )
+
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "אתה עוזר שממליץ על סרטים בעברית מתוך רשימה שניתנה."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=500,
+            temperature=0.7,
+        )
+        answer = response.choices[0].message.content.strip()
+    except Exception as e:
+        answer = "מצטער, קרתה שגיאה בשרת. אנא נסה שוב."
+
+    return jsonify({"response": answer})
+
+if __name__ == "__main__":
+    app.run(debug=True)
