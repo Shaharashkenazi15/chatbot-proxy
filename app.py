@@ -18,42 +18,45 @@ except Exception as e:
     print("⚠️ שגיאה בטעינת movies.csv:", e)
     df = pd.DataFrame()
 
+general_phrases = ["שלום", "מה נשמע", "מה קורה", "מה שלומך", "היי", "אהלן"]
+recommendation_keywords = ["תמליץ", "סרטים", "מה לראות", "סרט", "ממליץ"]
+
+def detect_mood(message):
+    message = message.lower()
+    if any(word in message for word in ["עצוב", "בדיכאון", "בוכה"]):
+        return "עצוב"
+    if any(word in message for word in ["כועס", "עצבני", "מתוסכל"]):
+        return "כועס"
+    if any(word in message for word in ["שמח", "מאושר", "טוב לי"]):
+        return "שמח"
+    if any(word in message for word in ["לחוץ", "חרד", "עומס"]):
+        return "לחוץ"
+    return "רגיל"
+
 def extract_number_of_movies(message):
-    match = re.search(r'(\d+)', message)
+    match = re.search(r'(\d+)\s*סרט', message)
     if match:
         return min(int(match.group(1)), 5)
     return 1
 
-SYSTEM_PROMPT = """
-אתה עוזר אישי שממליץ על סרטים מתוך רשימת סרטים שהוזנה.
-אם זו בקשה לסרט, על סמך מצב רוח או תיאור של המשתמש, בחר סרט אחד או יותר מתוך הרשימה לפי ההתאמה הטובה ביותר.
-כתוב את המלצתך בעברית, וכתוב את שם הסרט באנגלית בדיוק כפי שהוא מופיע ברשימה.
-הנה רשימת הסרטים (כותרות: Series_Title, Released_Year, Runtime, Genre, Rating, Overview, Director):
-"""
-
-def get_movies_list_text():
-    lines = []
-    for idx, row in df.iterrows():
-        # נשלח שורה קצרה עם שם, שנה, ז'אנר ותיאור
-        lines.append(
-            f"{row['Series_Title']} ({row['Released_Year']}), ז'אנר: {row['Genre']}, דירוג: {row['Rating']}, תקציר: {row['Overview'][:100]}..."
-        )
-    return "\n".join(lines)
-
-@app.route("/recommend", methods=["POST"])
-def recommend():
+@app.route("/chat", methods=["POST"])
+def chat():
     data = request.get_json()
-    if not data or "mood" not in data:
-        return jsonify({"error": "Missing 'mood' parameter in JSON body"}), 400
-    
-    mood = data["mood"].strip()
-    if not mood:
-        return jsonify({"error": "Empty 'mood' parameter"}), 400
+    messages = data.get("messages", [])
+    user_message = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "").lower()
 
-    # כמה סרטים לבקש? חפש מספר בהודעה (למשל "3 סרטים")
-    num_movies = extract_number_of_movies(mood)
+    wants_recommendation = any(k in user_message for k in recommendation_keywords)
+    said_greeting = any(p in user_message for p in general_phrases)
 
-    # בחר סרטים עם דירוג גבוה
+    if said_greeting and not wants_recommendation:
+        return jsonify({
+            "response": "שלום! אני אשמח להמליץ לך על סרטים. כתוב לי איך אתה מרגיש או איזה סוג סרט בא לך לראות."
+        })
+
+    num_movies = extract_number_of_movies(user_message) if wants_recommendation else 1
+    if said_greeting and wants_recommendation:
+        num_movies = max(num_movies, 3)
+
     high_rating_df = df[df['Rating'] >= 8.5]
 
     if len(high_rating_df) < num_movies:
@@ -68,32 +71,31 @@ def recommend():
         movies_text += f"{m['Series_Title']} ({m['Released_Year']}), ז'אנר: {m['Genre']}, דירוג: {m['Rating']}\nתקציר: {m['Overview']}\n\n"
 
     prompt = (
-        f"המשתמש כתב: {mood}\n\n"
-        f"הנה רשימת הסרטים:\n\n{movies_text}\n\n"
-        f"בחר {num_movies} סרטים שמתאימים לבקשה ולמצב הרוח של המשתמש. "
-        f"ענה בעברית בלבד, בצורה חמה וחברית. עבור כל סרט כתוב את כל המידע בפסקה אחת רציפה וברורה, "
-        f"כולל שם הסרט באנגלית, שנה, ז'אנר, דירוג, תקציר באנגלית, ומשפט הסבר למה בחרת דווקא אותו. "
-        f"אל תשתמש במספרים, כותרות או רשימות ממוספרות. "
-        f"הפרד בין סרט לסרט על ידי שורה ריקה בלבד. "
-        f"אל תמציא סרטים – השתמש רק באלו שסיפקתי."
+    f"המשתמש כתב: {user_message} (מצב רוח: {detect_mood(user_message)})\n\n"
+    f"הנה רשימת הסרטים:\n\n{movies_text}\n\n"
+    f"בחר {num_movies} סרטים שמתאימים לבקשה ולמצב הרוח של המשתמש. "
+    f"ענה בעברית בלבד, בצורה חמה וחברית. עבור כל סרט כתוב את כל המידע בפסקה אחת רציפה וברורה, "
+    f"כולל שם הסרט באנגלית, שנה, ז'אנר, דירוג, תקציר באנגלית, ומשפט הסבר למה בחרת דווקא אותו. "
+    f"אל תשתמש במספרים, כותרות או רשימות ממוספרות. "
+    f"הפרד בין סרט לסרט על ידי שורה ריקה בלבד. "
+    f"אל תמציא סרטים – השתמש רק באלו שסיפקתי."
     )
 
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "ענה בעברית בלבד. אל תמציא מידע."},
+                {"role": "system", "content": "ענה בעברית בלבד. הצג כל סרט כבלוק עצמאי. אל תמציא מידע."},
                 {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=300,
+            ]
         )
-        answer = response.choices[0].message.content.strip()
-        return jsonify({"recommendation": answer})
+        raw_response = response.choices[0].message.content
+
+        return jsonify({"response": raw_response})
 
     except Exception as e:
-        print("⚠️ שגיאה מ־OpenAI:", e)
-        return jsonify({"error": "אירעה שגיאה בעת עיבוד ההמלצה. נסה שוב מאוחר יותר."}), 500
+        print("⚠️ שגיאה:", e)
+        return jsonify({"response": "אירעה שגיאה בעת עיבוד ההמלצה. נסה שוב מאוחר יותר."}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
