@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import openai
 import os
 import pandas as pd
+import json
 import random
 from flask_cors import CORS
 
@@ -10,16 +11,13 @@ CORS(app)
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# טען את קובץ הסרטים וסנן סדרות
+# טען את קובץ הסרטים
 try:
-    df = pd.read_csv("movies.csv")
+    df = pd.read_csv("/mnt/data/movies.csv")
     df = df[~df["Series_Title"].str.contains("TV|Series", case=False, na=False)]
 except Exception as e:
     print("⚠️ שגיאה בטעינת movies.csv:", e)
     df = pd.DataFrame()
-
-# ביטויים של שיחה כללית
-general_phrases = ["שלום", "מה נשמע", "מה קורה", "מה שלומך", "היי", "אהלן"]
 
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -27,33 +25,72 @@ def chat():
     messages = data.get("messages", [])
     user_message = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
 
-    # תגובה לשאלה כללית – ללא שימוש במודל
-    if any(p in user_message.lower() for p in general_phrases):
-        return jsonify({"response": "היי! 😊 אני כאן כדי להמליץ לך על סרטים טובים. ספר לי מה בא לך לראות 🎬"})
-
-    # בחר עד 50 סרטים עם דירוג גבוה
-    top_movies = df.sort_values(by="Rating", ascending=False).head(50)
-
-    # בנה רשימת סרטים לשליחה ל-GPT
-    movie_list = top_movies[['Series_Title', 'Released_Year', 'Genre', 'Rating', 'Overview']].to_string(index=False)
-
-    prompt = (
-        f"המשתמש כתב: {user_message}\n\n"
-        f"הנה רשימת הסרטים:\n\n{movie_list}\n\n"
-        "בחר סרט אחד בלבד שמתאים לבקשה. ענה בעברית. "
-        "הצג את שם הסרט באנגלית בלבד, ואז תכתוב את השנה, הז'אנר, הדירוג והתקציר בעברית. "
-        "אם אין התאמה ברורה – תמליץ על סרט כללי מהרשימה. אל תמציא סרטים חדשים או מידע לא קיים."
+    # שלב 1: ניתוח מצב רוח / העדפה
+    mood_prompt = (
+        f"המשתמש כתב: {user_message}\n"
+        "סכם את מצב הרוח או ההעדפה שלו לצפייה בסרט.\n"
+        "ענה במבנה JSON תקני כמו:\n"
+        '{ "mood": "עצוב", "desired_genres": ["Comedy", "Romance"], "keywords": ["love", "funny"] }\n'
+        "אם אי אפשר להבין – החזר mood 'רגיל' ורשום genre כלליים."
     )
 
     try:
-        response = openai.ChatCompletion.create(
+        mood_response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "ענה רק לפי הסרטים שקיבלת. אל תמציא. ענה תמיד בעברית."},
-                {"role": "user", "content": prompt}
+                {"role": "system", "content": "אתה מנתח כוונות וציפיות מסרטים. ענה כ-JSON בלבד."},
+                {"role": "user", "content": mood_prompt}
             ]
         )
-        return jsonify({"response": response.choices[0].message.content})
+        filters = json.loads(mood_response.choices[0].message.content)
+    except Exception as e:
+        print("⚠️ שגיאה בניתוח JSON:", e)
+        filters = {"mood": "רגיל", "desired_genres": [], "keywords": []}
+
+    # שלב 2: סינון וסידור הסרטים
+    filtered_df = df.copy()
+
+    if filters.get("desired_genres"):
+        filtered_df = filtered_df[
+            filtered_df["Genre"].str.contains('|'.join(filters["desired_genres"]), case=False, na=False)
+        ]
+
+    if filters.get("keywords"):
+        for kw in filters["keywords"]:
+            filtered_df = filtered_df[filtered_df["Overview"].str.contains(kw, case=False, na=False)]
+
+    # אם אין תוצאה – חזור לקובץ המלא
+    if filtered_df.empty:
+        filtered_df = df.copy()
+
+    # שלב 3: בחר רנדומלית 10 סרטים שונים
+    sample_movies = filtered_df.sample(n=min(10, len(filtered_df)))
+
+    movie_list = ""
+    for _, row in sample_movies.iterrows():
+        movie_list += (
+            f"Title: {row['Series_Title']}\n"
+            f"Year: {row['Released_Year']}\n"
+            f"Overview: {row['Overview']}\n\n"
+        )
+
+    # שלב 4: שלח ל־GPT לבחור סרט אחד בלבד
+    final_prompt = (
+        f"המשתמש כתב: {user_message}\n"
+        f"הנה סרטים לבחירה:\n\n{movie_list}\n"
+        "בחר סרט אחד בלבד שמתאים לבקשה או למצב הרוח. ענה בעברית בלבד. אל תמציא סרטים.\n"
+        "הצג את שם הסרט באנגלית, השנה, והתקציר בעברית בלבד."
+    )
+
+    try:
+        final_response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "ענה רק לפי הסרטים שנשלחו. אל תמציא. ענה בעברית בלבד."},
+                {"role": "user", "content": final_prompt}
+            ]
+        )
+        return jsonify({"response": final_response.choices[0].message.content})
     except Exception as e:
         print("⚠️ שגיאה:", e)
         return jsonify({"error": str(e)}), 500
