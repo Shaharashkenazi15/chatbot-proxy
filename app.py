@@ -1,3 +1,13 @@
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import openai
+import os
+import pandas as pd
+import re
+
+app = Flask(__name__)  # ← זה חייב לבוא לפני כל @app.route
+CORS(app)
+
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.get_json()
