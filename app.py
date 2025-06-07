@@ -57,11 +57,18 @@ def chat():
     if said_greeting and wants_recommendation:
         num_movies = max(num_movies, 3)
 
-    high_rating_df = df[df['Rating'] >= 8.5]
+    # גרילה של 30 סרטים רנדומליים מתוך כל ה-DF
+    if len(df) >= 30:
+        sample_30 = df.sample(n=30)
+    else:
+        sample_30 = df.copy()
+
+    # בוחרים את הסרטים בעלי דירוג גבוה מתוך ה-30
+    high_rating_df = sample_30[sample_30['Rating'] >= 8.5]
 
     if len(high_rating_df) < num_movies:
         needed = num_movies - len(high_rating_df)
-        other_movies = df[~df.index.isin(high_rating_df.index)]
+        other_movies = sample_30[~sample_30.index.isin(high_rating_df.index)]
         selected_movies = pd.concat([high_rating_df, other_movies.sample(n=needed)])
     else:
         selected_movies = high_rating_df.sample(n=num_movies)
@@ -71,14 +78,14 @@ def chat():
         movies_text += f"{m['Series_Title']} ({m['Released_Year']}), ז'אנר: {m['Genre']}, דירוג: {m['Rating']}\nתקציר: {m['Overview']}\n\n"
 
     prompt = (
-    f"המשתמש כתב: {user_message} (מצב רוח: {detect_mood(user_message)})\n\n"
-    f"הנה רשימת הסרטים:\n\n{movies_text}\n\n"
-    f"בחר {num_movies} סרטים שמתאימים לבקשה ולמצב הרוח של המשתמש. "
-    f"ענה בעברית בלבד, בצורה חמה וחברית. עבור כל סרט כתוב את כל המידע בפסקה אחת רציפה וברורה, "
-    f"כולל שם הסרט באנגלית, שנה, ז'אנר, דירוג, תקציר בעברית, ומשפט הסבר למה בחרת דווקא אותו. "
-    f"אל תשתמש במספרים, כותרות או רשימות ממוספרות. "
-    f"הפרד בין סרט לסרט על ידי שורה ריקה בלבד. "
-    f"אל תמציא סרטים – השתמש רק באלו שסיפקתי."
+        f"המשתמש כתב: {user_message} (מצב רוח: {detect_mood(user_message)})\n\n"
+        f"הנה רשימת הסרטים:\n\n{movies_text}\n\n"
+        f"בחר {num_movies} סרטים שמתאימים לבקשה ולמצב הרוח של המשתמש. "
+        f"ענה בעברית בלבד, בצורה חמה וחברית. עבור כל סרט כתוב את כל המידע בפסקה אחת רציפה וברורה, "
+        f"כולל שם הסרט באנגלית, שנה, ז'אנר, דירוג, תקציר באנגלית, ומשפט הסבר למה בחרת דווקא אותו. "
+        f"אל תשתמש במספרים, כותרות או רשימות ממוספרות. "
+        f"הפרד בין סרט לסרט על ידי שורה ריקה בלבד. "
+        f"אל תמציא סרטים – השתמש רק באלו שסיפקתי."
     )
 
     try:
