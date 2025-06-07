@@ -50,9 +50,7 @@ def chat():
 
     if said_greeting and not wants_recommendation:
         return jsonify({
-            "messages": [
-                {"role": "assistant", "content": "שלום! אני אשמח להמליץ לך על סרטים. כתוב לי איך אתה מרגיש או איזה סוג סרט בא לך לראות."}
-            ]
+            "response": "שלום! אני אשמח להמליץ לך על סרטים. כתוב לי איך אתה מרגיש או איזה סוג סרט בא לך לראות."
         })
 
     num_movies = extract_number_of_movies(user_message) if wants_recommendation else 1
@@ -92,15 +90,11 @@ def chat():
         )
         raw_response = response.choices[0].message.content
 
-        # חלוקה להודעות לפי בלוקים של סרטים
-        movie_blocks = re.split(r'\n\s*\n', raw_response.strip())
-        reply_messages = [{"role": "assistant", "content": block.strip()} for block in movie_blocks if block.strip()]
-
-        return jsonify({"messages": reply_messages})
+        return jsonify({"response": raw_response})
 
     except Exception as e:
         print("⚠️ שגיאה:", e)
-        return jsonify({"messages": [{"role": "assistant", "content": "אירעה שגיאה בעת עיבוד ההמלצה. נסה שוב מאוחר יותר."}]}), 500
+        return jsonify({"response": "אירעה שגיאה בעת עיבוד ההמלצה. נסה שוב מאוחר יותר."}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
