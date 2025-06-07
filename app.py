@@ -18,8 +18,21 @@ except Exception as e:
     print("⚠️ שגיאה בטעינת movies.csv:", e)
     df = pd.DataFrame()
 
-# ביטויים של שיחה כללית
+# ביטויי שיחה כללית
 general_phrases = ["שלום", "מה נשמע", "מה קורה", "מה שלומך", "היי", "אהלן"]
+
+# זיהוי מצב רוח פשוט
+def detect_mood(message):
+    message = message.lower()
+    if any(word in message for word in ["עצוב", "בדיכאון", "בוכה"]):
+        return "עצוב"
+    if any(word in message for word in ["כועס", "עצבני", "מתוסכל"]):
+        return "כועס"
+    if any(word in message for word in ["שמח", "מאושר", "טוב לי"]):
+        return "שמח"
+    if any(word in message for word in ["לחוץ", "חרד", "עומס"]):
+        return "לחוץ"
+    return "רגיל"
 
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -27,29 +40,32 @@ def chat():
     messages = data.get("messages", [])
     user_message = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
 
-    # תגובה לשאלה כללית – ללא שימוש במודל
+    # תגובה לשיחה כללית
     if any(p in user_message.lower() for p in general_phrases):
-        return jsonify({"response": "היי! 😊 אני כאן כדי להמליץ לך על סרטים טובים. ספר לי מה בא לך לראות 🎬"})
+        return jsonify({"response": "שלום! אני יכול להמליץ לך על סרטים לפי מצב רוח או סגנון. ספר לי איך אתה מרגיש או מה מתחשק לך לראות."})
 
-    # בחר עד 50 סרטים עם דירוג גבוה
-    top_movies = df.sort_values(by="Rating", ascending=False).head(50)
+    # זיהוי מצב רוח
+    mood = detect_mood(user_message)
 
-    # בנה רשימת סרטים לשליחה ל-GPT
-    movie_list = top_movies[['Series_Title', 'Released_Year', 'Genre', 'Rating', 'Overview']].to_string(index=False)
+    # שלוף 30-50 סרטים אקראיים
+    sample_size = min(50, len(df))
+    selected_movies = df.sample(n=sample_size)
+
+    movie_list = selected_movies[['Series_Title', 'Released_Year', 'Genre', 'Rating', 'Overview']].to_string(index=False)
 
     prompt = (
-        f"המשתמש כתב: {user_message}\n\n"
+        f"המשתמש כתב: {user_message} (מצב רוח: {mood})\n\n"
         f"הנה רשימת הסרטים:\n\n{movie_list}\n\n"
-        "בחר סרט אחד בלבד שמתאים לבקשה. ענה בעברית. "
-        "הצג את שם הסרט באנגלית בלבד, ואז תכתוב את השנה, הז'אנר, הדירוג והתקציר בעברית. "
-        "אם אין התאמה ברורה – תמליץ על סרט כללי מהרשימה. אל תמציא סרטים חדשים או מידע לא קיים."
+        "בחר סרט אחד בלבד שמתאים לבקשה או למצב הרוח. ענה בעברית בלבד. "
+        "הצג את שם הסרט באנגלית, ואז את שנת היציאה, הז'אנר, הדירוג והתקציר – כולם בעברית. "
+        "בחר רק מתוך הרשימה. אל תמציא סרטים חדשים או מידע נוסף."
     )
 
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "ענה רק לפי הסרטים שקיבלת. אל תמציא. ענה תמיד בעברית."},
+                {"role": "system", "content": "ענה בעברית בלבד. בחר סרט רק מתוך הרשימה. אל תמציא מידע."},
                 {"role": "user", "content": prompt}
             ]
         )
