@@ -2,139 +2,151 @@ from flask import Flask, request, jsonify
 import pandas as pd
 import openai
 import os
-import random
 import re
+import random
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
+# Load dataset
 df = pd.read_csv("movies.csv")
+df.dropna(subset=["title", "genres", "runtime_minutes", "adult", "final_score"], inplace=True)
 
-user_state = {}
+# Define genre list from dataset
+def extract_all_genres():
+    genre_set = set()
+    for genres in df["genres"].dropna():
+        for g in genres.strip("[]").replace("'", "").split(","):
+            genre_set.add(g.strip().title())
+    return sorted(genre_set)
 
-def is_relevant_via_gpt(message: str):
+GENRE_OPTIONS = extract_all_genres()
+LENGTH_OPTIONS = {
+    "short": (0, 90),
+    "medium": (91, 120),
+    "long": (121, 1000)
+}
+
+# Session state
+sessions = {}
+
+# Helper: Check if English
+def is_english(text):
+    return bool(re.match(r'^[\x00-\x7F\s.,!?\'"-]+$', text))
+
+# Helper: Get mood or context using GPT
+def is_movie_related(user_input):
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             temperature=0,
             messages=[
-                {"role": "system", "content": "You determine if a message is relevant to movie recommendation, including if it contains mood, situation or genre."},
-                {"role": "user", "content": f'Does the user seem to want a movie recommendation, or is the message about mood, situation or preference that can guide a movie suggestion?\nAnswer "yes" or "no".\n"{message}"'}
+                {"role": "system", "content": "You are an assistant that classifies if a message is related to movies or not."},
+                {"role": "user", "content": f"Is the following message about movies or movie recommendations?\n\n'{user_input}'\n\nAnswer 'yes' or 'no' only."}
             ]
         )
         reply = response.choices[0].message.content.strip().lower()
-        return reply.startswith("yes")
+        return "yes" in reply
     except:
         return False
 
-def contains_non_english(text):
-    return bool(re.search(r'[א-ת]|[^\x00-\x7F]', text))
+# Helper: Extract runtime category
+def get_runtime_category(runtime):
+    for label, (min_r, max_r) in LENGTH_OPTIONS.items():
+        if min_r <= runtime <= max_r:
+            return label
+    return None
 
-def reset_user(session_id):
-    user_state[session_id] = {"mood": None, "length": None, "genre": None}
-
+# Route
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.get_json()
     messages = data.get("messages", [])
-    user_message = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "").strip()
-
-    session_id = request.remote_addr or str(random.randint(1000, 9999))
-    if session_id not in user_state:
-        reset_user(session_id)
+    user_message = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
 
     # Reject non-English input
-    if contains_non_english(user_message):
-        return jsonify({"response": "❌ This assistant only supports English. Please write in English only."})
+    if not is_english(user_message):
+        return jsonify({"response": "❌ This assistant only understands English. Please try again using English only."})
 
-    # Reject messages with just numbers or symbols
-    if not re.search(r'[a-zA-Z]', user_message):
-        return jsonify({"response": "❌ Please write a meaningful message in English."})
+    # Get session ID (or use IP in real use)
+    session_id = data.get("session_id", "default")
 
-    if not is_relevant_via_gpt(user_message):
-        return jsonify({"response": "🎬 I can only help with movie recommendations. Please tell me what kind of movie you're looking for."})
+    if session_id not in sessions:
+        sessions[session_id] = {"genre": None, "length": None, "adult": None}
 
-    state = user_state[session_id]
+    session = sessions[session_id]
 
-    # Try to extract mood or genre or length
-    if state["mood"] is None:
-        if any(w in user_message.lower() for w in ["sad", "down", "depressed"]):
-            state["mood"] = "uplifting"
-        elif any(w in user_message.lower() for w in ["happy", "excited", "fun"]):
-            state["mood"] = "fun"
-        elif any(w in user_message.lower() for w in ["angry", "frustrated"]):
-            state["mood"] = "calming"
-        elif any(w in user_message.lower() for w in ["anxious", "stressed"]):
-            state["mood"] = "relaxing"
+    # Try to detect if related to movies
+    if not is_movie_related(user_message):
+        return jsonify({"response": "🤖 I'm here to help with movie recommendations. Try telling me your mood or what kind of movie you're looking for!"})
 
-    if state["length"] is None:
-        if "short" in user_message.lower():
-            state["length"] = "short"
-        elif "medium" in user_message.lower():
-            state["length"] = "medium"
-        elif "long" in user_message.lower():
-            state["length"] = "long"
+    # Try to extract known labels
+    msg_lower = user_message.lower()
 
-    if state["genre"] is None:
-        genres = ["comedy", "drama", "action", "romance", "thriller", "horror", "adventure"]
-        for genre in genres:
-            if genre in user_message.lower():
-                state["genre"] = genre
+    # Detect genre
+    if not session["genre"]:
+        for genre in GENRE_OPTIONS:
+            if genre.lower() in msg_lower:
+                session["genre"] = genre
                 break
 
-    # If still missing info, ask for it
-    if not state["genre"]:
-        return jsonify({"response": "🎬 What genre are you in the mood for? (e.g. comedy, action, drama...)"})
-    if not state["length"]:
-        return jsonify({"response": "⏱️ What movie length do you prefer?\n- Short (up to 90 min)\n- Medium (up to 120 min)\n- Long (over 120 min)"})
+    # Detect length
+    if not session["length"]:
+        if "short" in msg_lower:
+            session["length"] = "short"
+        elif "medium" in msg_lower:
+            session["length"] = "medium"
+        elif "long" in msg_lower:
+            session["length"] = "long"
 
-    # Match length to minutes
-    if state["length"] == "short":
-        length_range = (0, 90)
-    elif state["length"] == "medium":
-        length_range = (90, 120)
-    else:
-        length_range = (120, 500)
+    # Detect adult
+    if not session["adult"]:
+        if "adult" in msg_lower:
+            session["adult"] = True
+        elif "family" in msg_lower or "all ages" in msg_lower or "everyone" in msg_lower:
+            session["adult"] = False
 
-    cluster_df = df[
-        (df["genres"].str.lower().str.contains(state["genre"])) &
-        (df["runtime_minutes"].between(length_range[0], length_range[1]))
+    # Ask missing info
+    if not session["genre"]:
+        return jsonify({"response": "[[ASK_GENRE]]"})
+
+    if not session["length"]:
+        return jsonify({"response": "[[ASK_LENGTH]]"})
+
+    if session["adult"] is None:
+        return jsonify({"response": "[[ASK_ADULT]]"})
+
+    # All info present — filter
+    min_len, max_len = LENGTH_OPTIONS[session["length"]]
+    genre_str = session["genre"].lower()
+
+    filtered = df[
+        df["genres"].str.lower().str.contains(genre_str) &
+        (df["runtime_minutes"] >= min_len) &
+        (df["runtime_minutes"] <= max_len) &
+        (df["adult"] == session["adult"])
     ]
 
-    if cluster_df.empty:
-        return jsonify({"response": "😕 Sorry, I couldn't find matching movies. Try a different genre or length."})
+    if filtered.empty:
+        return jsonify({"response": "😕 Sorry, I couldn't find matching movies. Try changing the genre or length."})
 
-    sample = cluster_df.sort_values(by="final_score", ascending=False).head(25)
+    sample = filtered.sort_values("final_score", ascending=False).head(25)
+    recommendations = []
 
-    prompt = (
-        f"You are a helpful movie assistant. The user is in the mood: {state['mood'] or 'unknown'}, "
-        f"and prefers genre: {state['genre']}, and length: {state['length']}.\n"
-        "Here are 25 movie options from the dataset. Pick 1-3 movies that best match the user's needs.\n"
-        "Only choose from the list. Don't invent. Respond in clear, warm English.\n\n"
-        "Format for each movie:\n"
-        "<Title>\n<Release Year>\n<Genre>\n<Overview>\n<Main Actor>\n<Runtime in minutes>\n"
-        "<Explain briefly why this movie suits the user>\n\n"
-        "Separate each movie block with an empty line.\n\n"
-        "Movies:\n" +
-        sample[["title", "release_year", "genres", "overview", "main_actor", "runtime_minutes"]]
-        .to_string(index=False)
-    )
-
-    try:
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            temperature=0.7,
-            messages=[
-                {"role": "system", "content": "You are a movie assistant. Recommend movies based only on the provided data. Never make up any movie."},
-                {"role": "user", "content": prompt}
-            ]
+    for _, row in sample.iterrows():
+        recommendations.append(
+            f"🎬 {row['title']} ({int(row['release_year'])})\n"
+            f"Genre: {row['genres']}\n"
+            f"Duration: {int(row['runtime_minutes'])} minutes\n"
+            f"⭐ Score: {round(row['final_score'], 2)}\n"
+            f"Overview: {row['overview']}"
         )
-        reply = response.choices[0].message.content.strip()
-        return jsonify({"response": reply})
-    except Exception as e:
-        return jsonify({"response": f"⚠️ Error processing request: {str(e)}"})
+
+    response_text = "\n\n".join(recommendations[:5])
+    return jsonify({"response": response_text})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
