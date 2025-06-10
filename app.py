@@ -1,3 +1,4 @@
+# Updated Flask backend with proper flow and mood-based genre extraction
 from flask import Flask, request, jsonify
 import pandas as pd
 import openai
@@ -101,26 +102,15 @@ def chat():
     session = SESSIONS[session_id]
 
     intent = detect_intent(user_msg)
+    greeting_prefix = ""
+
     if intent == "unrelated":
         return jsonify({"response": "🤖 I'm here to help you discover great movies. Tell me how you're feeling or what you're in the mood for!"})
+
     if intent == "greeting":
-        greeting_msg = "👋 Hey! I'm here to help you find the perfect movie. What's your vibe today?"
-        genre = classify(user_msg, "genre")
-        if genre in GENRE_OPTIONS:
-            session["genre"] = genre
-        else:
-            mood_based = suggest_genre_by_mood(user_msg)
-            if mood_based:
-                session["genre"] = mood_based
-        return jsonify({"response": greeting_msg})
+        greeting_prefix = "👋 Hey! I'm here to help you find the perfect movie. What's your vibe today?\n"
 
-    if user_msg in GENRE_OPTIONS:
-        session["genre"] = user_msg
-    elif user_msg in LENGTH_OPTIONS:
-        session["length"] = user_msg
-    elif user_msg in ADULT_OPTIONS:
-        session["adult"] = ADULT_OPTIONS[user_msg]
-
+    # Always try to classify genre/mood/length/audience
     if not session["genre"]:
         genre = classify(user_msg, "genre")
         if genre in GENRE_OPTIONS:
@@ -144,6 +134,15 @@ def chat():
         elif "all" in a:
             session["adult"] = False
 
+    # Handle button replies
+    if user_msg in GENRE_OPTIONS:
+        session["genre"] = user_msg
+    elif user_msg in LENGTH_OPTIONS:
+        session["length"] = user_msg
+    elif user_msg in ADULT_OPTIONS:
+        session["adult"] = ADULT_OPTIONS[user_msg]
+
+    # Ask for missing info
     if not session["genre"]:
         return jsonify({"response": "[[ASK_GENRE]]"})
     if not session["length"]:
@@ -151,6 +150,7 @@ def chat():
     if session["adult"] is None:
         return jsonify({"response": "[[ASK_ADULT]]"})
 
+    # Recommend movies
     genre = session["genre"].lower()
     min_len, max_len = LENGTH_OPTIONS[session["length"]]
     is_adult = session["adult"]
@@ -167,7 +167,7 @@ def chat():
     cluster_id = filtered["cluster_id"].mode().iloc[0]
     result_df = df[df["cluster_id"] == cluster_id].copy()
     sample_size = min(40, len(result_df))
-    result_df = result_df.sample(n=sample_size, weights=result_df["final_score"], random_state=random.randint(1,10000))
+    result_df = result_df.sample(n=sample_size, weights=result_df["final_score"], random_state=random.randint(1, 10000))
 
     response = []
     for _, row in result_df.iterrows():
@@ -179,7 +179,7 @@ def chat():
             f"Overview: {row['overview']}"
         )
 
-    return jsonify({"response": "\n\n".join(response)})
+    return jsonify({"response": greeting_prefix + "\n\n".join(response)})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
