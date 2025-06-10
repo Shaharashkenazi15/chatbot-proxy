@@ -133,6 +133,10 @@ def chat():
     if intent == "unrelated":
         return jsonify({"response": "🤖 I'm here to help with movie recommendations. Tell me how you're feeling or what kind of movie you'd like."})
     if intent == "greeting":
+    if session["genre"] and session["length"] and session["adult"] is not None:
+        # כבר יש את כל הנתונים – נמשיך ישר לשלב ההמלצה
+        pass
+    else:
         return jsonify({"response": "👋 Hey! I'm here to help you find the perfect movie. What's your vibe today?"})
 
     # Try to classify inputs
