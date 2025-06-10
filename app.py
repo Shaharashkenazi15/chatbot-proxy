@@ -3,7 +3,6 @@ import pandas as pd
 import openai
 import os
 import re
-import random
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -13,7 +12,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # Load dataset
 df = pd.read_csv("movies.csv")
-df.dropna(subset=["title", "genres", "runtime_minutes", "adult", "final_score"], inplace=True)
+df.dropna(subset=["title", "genres", "runtime", "adult", "final_score"], inplace=True)
 
 # Extract genre options
 def extract_all_genres():
@@ -109,7 +108,7 @@ def chat():
 
     filtered = df[
         df["genres"].str.lower().str.contains(genre_filter) &
-        df["runtime_minutes"].between(min_len, max_len) &
+        df["runtime"].between(min_len, max_len) &
         (df["adult"] == is_adult)
     ]
 
@@ -122,7 +121,7 @@ def chat():
         results.append(
             f"🎬 {row['title']} ({int(row['release_year'])})\n"
             f"Genre: {row['genres']}\n"
-            f"Duration: {int(row['runtime_minutes'])} min\n"
+            f"Duration: {int(row['runtime'])} min\n"
             f"Score: {round(row['final_score'], 2)}\n"
             f"Overview: {row['overview']}"
         )
