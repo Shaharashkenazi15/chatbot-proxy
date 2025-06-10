@@ -1,137 +1,174 @@
-from flask import Flask, request, jsonify
-import pandas as pd
-import openai
-import os
-import re
-from flask_cors import CORS
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>🎬 Smart Movie Advisor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: linear-gradient(to bottom right, #141e30, #243b55);
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .chat-container {
+      background: white;
+      border-radius: 15px;
+      width: 95%;
+      max-width: 480px;
+      height: 90vh;
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+    }
+    #chatbox {
+      flex: 1;
+      overflow-y: auto;
+      margin-bottom: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .message {
+      padding: 12px 16px;
+      border-radius: 18px;
+      max-width: 75%;
+      word-wrap: break-word;
+      animation: fadeIn 0.3s ease;
+    }
+    .user { background: #e0f7fa; align-self: flex-start; }
+    .bot { background: #dcedc8; align-self: flex-end; }
 
-app = Flask(__name__)
-CORS(app)
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+    #controls {
+      display: flex;
+      gap: 10px;
+    }
+    input {
+      flex: 1;
+      padding: 12px;
+      border-radius: 999px;
+      border: 1px solid #ccc;
+      font-size: 16px;
+    }
+    button {
+      padding: 12px 16px;
+      border: none;
+      border-radius: 999px;
+      background: #4caf50;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .option-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .option-buttons button {
+      background: #2196f3;
+      color: white;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 20px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="chat-container">
+    <div id="chatbox"></div>
+    <div id="controls">
+      <input id="message" placeholder="Type a message..." onkeydown="if(event.key==='Enter') sendMessage()" />
+      <button onclick="sendMessage()">Send</button>
+    </div>
+  </div>
 
-# Load dataset
-df = pd.read_csv("movies.csv")
-df.dropna(subset=["title", "genres", "runtime", "adult", "final_score"], inplace=True)
+  <script>
+    let conversation = []
+    const chatbox = document.getElementById("chatbox");
 
-# Prepare options
-GENRE_OPTIONS = sorted({g.strip().title()
-    for genre_list in df["genres"]
-    for g in str(genre_list).strip("[]").replace("'", "").split(",") if g.strip()})
+    function appendMessage(text, type = "bot") {
+      const msg = document.createElement("div");
+      msg.className = `message ${type}`;
+      msg.textContent = text;
+      chatbox.appendChild(msg);
+      chatbox.scrollTop = chatbox.scrollHeight;
+    }
 
-LENGTH_OPTIONS = {
-    "Short (up to 90 min)": (0, 90),
-    "Medium (91-120 min)": (91, 120),
-    "Long (over 120 min)": (121, 1000)
-}
+    function appendOptions(tag) {
+      const container = document.createElement("div");
+      container.className = "option-buttons";
 
-ADULT_OPTIONS = {
-    "All Audiences": False,
-    "Adults Only": True
-}
+      let options = [];
 
-sessions = {}
+      if (tag === "[[ASK_GENRE]]") {
+        options = ["Action", "Comedy", "Drama", "Horror", "Romance", "Thriller", "Animation", "Adventure", "Fantasy"];
+      } else if (tag === "[[ASK_LENGTH]]") {
+        options = ["Short (up to 90 min)", "Medium (91-120 min)", "Long (over 120 min)"];
+      } else if (tag === "[[ASK_ADULT]]") {
+        options = ["All Audiences", "Adults Only"];
+      }
 
-def is_english(text):
-    return bool(re.match(r'^[\x00-\x7F\s.,!?\'"-]+$', text))
+      options.forEach(opt => {
+        const btn = document.createElement("button");
+        btn.textContent = opt;
+        btn.onclick = () => {
+          container.remove();
+          appendMessage(opt, "user");
+          conversation.push({ role: "user", content: opt });
+          fetchResponse(opt);
+        };
+        container.appendChild(btn);
+      });
 
-def classify_text(text, category):
-    prompt = f"""
-You are a classifier. Analyze this message: "{text}"
+      chatbox.appendChild(container);
+      chatbox.scrollTop = chatbox.scrollHeight;
+    }
 
-Classify the {category} of movie the user might want.
-Options for genre: {', '.join(GENRE_OPTIONS)}
-Options for length: Short, Medium, Long
-Options for audience: Adults Only, All Audiences
+    async function sendMessage() {
+      const input = document.getElementById("message");
+      const message = input.value.trim();
+      if (!message) return;
 
-Respond ONLY with the one word that matches the value, or "Unknown" if you're not sure.
-"""
-    try:
-        res = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            temperature=0,
-            messages=[{"role": "system", "content": prompt}]
-        )
-        result = res.choices[0].message.content.strip()
-        return result
-    except:
-        return "Unknown"
+      appendMessage(message, "user");
+      conversation.push({ role: "user", content: message });
+      input.value = "";
 
-@app.route("/chat", methods=["POST"])
-def chat():
-    data = request.get_json()
-    messages = data.get("messages", [])
-    user_message = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
-    session_id = data.get("session_id", "default")
+      await fetchResponse(message);
+    }
 
-    # Init session if needed
-    if session_id not in sessions:
-        sessions[session_id] = {"genre": None, "length": None, "adult": None}
-    session = sessions[session_id]
+    async function fetchResponse(message) {
+      try {
+        const res = await fetch("https://chatbot-proxy-4g5l.onrender.com/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: conversation })
+        });
 
-    if not is_english(user_message):
-        return jsonify({"response": "❌ English only please."})
+        const data = await res.json();
+        const reply = data.response;
 
-    # Check if this is a button reply:
-    if user_message in GENRE_OPTIONS:
-        session["genre"] = user_message
-    elif user_message in LENGTH_OPTIONS:
-        session["length"] = user_message
-    elif user_message in ADULT_OPTIONS:
-        session["adult"] = ADULT_OPTIONS[user_message]
-
-    # Try classify missing
-    if not session["genre"]:
-        result = classify_text(user_message, "genre")
-        if result in GENRE_OPTIONS:
-            session["genre"] = result
-    if not session["length"]:
-        result = classify_text(user_message, "length").lower()
-        for label in LENGTH_OPTIONS:
-            if result in label.lower():
-                session["length"] = label
-                break
-    if session["adult"] is None:
-        result = classify_text(user_message, "audience")
-        if result.lower().startswith("adult"):
-            session["adult"] = True
-        elif result.lower().startswith("all"):
-            session["adult"] = False
-
-    # Ask if missing
-    if not session["genre"]:
-        return jsonify({"response": "[[ASK_GENRE]]"})
-    if not session["length"]:
-        return jsonify({"response": "[[ASK_LENGTH]]"})
-    if session["adult"] is None:
-        return jsonify({"response": "[[ASK_ADULT]]"})
-
-    # All present – filter by cluster
-    genre = session["genre"].lower()
-    min_len, max_len = LENGTH_OPTIONS[session["length"]]
-    is_adult = session["adult"]
-
-    filtered = df[
-        df["genres"].str.lower().str.contains(genre) &
-        df["runtime"].between(min_len, max_len) &
-        (df["adult"] == is_adult)
-    ]
-
-    if filtered.empty:
-        return jsonify({"response": "😕 Sorry, no movies found. Try different preferences."})
-
-    top_movies = filtered.sort_values("final_score", ascending=False).head(5)
-
-    reply = "\n\n".join([
-        f"🎬 {row['title']} ({int(row['release_year'])})\n"
-        f"Genre: {row['genres']}\n"
-        f"Length: {int(row['runtime'])} min\n"
-        f"Score: {round(row['final_score'], 2)}\n"
-        f"Overview: {row['overview']}"
-        for _, row in top_movies.iterrows()
-    ])
-
-    return jsonify({"response": reply})
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+        if (["[[ASK_GENRE]]", "[[ASK_LENGTH]]", "[[ASK_ADULT]]"].includes(reply)) {
+          appendMessage("Please choose:", "bot");
+          appendOptions(reply);
+        } else {
+          appendMessage(reply, "bot");
+          conversation.push({ role: "assistant", content: reply });
+        }
+      } catch (err) {
+        appendMessage("⚠️ Error connecting to server.", "bot");
+      }
+    }
+  </script>
+</body>
+</html>
