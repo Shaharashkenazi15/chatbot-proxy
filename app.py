@@ -1,4 +1,3 @@
-# Updated Flask backend for Smart Movie Chat with smarter greeting handling
 from flask import Flask, request, jsonify
 import pandas as pd
 import openai
@@ -13,8 +12,8 @@ CORS(app)
 # Load dataset
 df = pd.read_csv("movies.csv")
 df.dropna(subset=["title", "genres", "runtime", "adult", "final_score", "cluster_id"], inplace=True)
-
 df["adult"] = df["adult"].astype(bool)
+
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 GENRE_OPTIONS = sorted({g.strip().title()
@@ -106,7 +105,6 @@ def chat():
         return jsonify({"response": "🤖 I'm here to help you discover great movies. Tell me how you're feeling or what you're in the mood for!"})
     if intent == "greeting":
         greeting_msg = "👋 Hey! I'm here to help you find the perfect movie. What's your vibe today?"
-        # Continue processing even after greeting
         genre = classify(user_msg, "genre")
         if genre in GENRE_OPTIONS:
             session["genre"] = genre
@@ -116,7 +114,6 @@ def chat():
                 session["genre"] = mood_based
         return jsonify({"response": greeting_msg})
 
-    # Handle button replies
     if user_msg in GENRE_OPTIONS:
         session["genre"] = user_msg
     elif user_msg in LENGTH_OPTIONS:
@@ -124,7 +121,6 @@ def chat():
     elif user_msg in ADULT_OPTIONS:
         session["adult"] = ADULT_OPTIONS[user_msg]
 
-    # Try to classify if not already known
     if not session["genre"]:
         genre = classify(user_msg, "genre")
         if genre in GENRE_OPTIONS:
@@ -148,7 +144,6 @@ def chat():
         elif "all" in a:
             session["adult"] = False
 
-    # Ask for missing info
     if not session["genre"]:
         return jsonify({"response": "[[ASK_GENRE]]"})
     if not session["length"]:
@@ -156,7 +151,6 @@ def chat():
     if session["adult"] is None:
         return jsonify({"response": "[[ASK_ADULT]]"})
 
-    # Filter and recommend from cluster
     genre = session["genre"].lower()
     min_len, max_len = LENGTH_OPTIONS[session["length"]]
     is_adult = session["adult"]
