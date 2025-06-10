@@ -1,4 +1,4 @@
-# Updated Flask backend for Smart Movie Chat
+# Updated Flask backend for Smart Movie Chat with smarter greeting handling
 from flask import Flask, request, jsonify
 import pandas as pd
 import openai
@@ -102,10 +102,19 @@ def chat():
     session = SESSIONS[session_id]
 
     intent = detect_intent(user_msg)
-    if intent == "greeting":
-        return jsonify({"response": "👋 Hey! I'm here to help you find the perfect movie. What's your vibe today?"})
     if intent == "unrelated":
         return jsonify({"response": "🤖 I'm here to help you discover great movies. Tell me how you're feeling or what you're in the mood for!"})
+    if intent == "greeting":
+        greeting_msg = "👋 Hey! I'm here to help you find the perfect movie. What's your vibe today?"
+        # Continue processing even after greeting
+        genre = classify(user_msg, "genre")
+        if genre in GENRE_OPTIONS:
+            session["genre"] = genre
+        else:
+            mood_based = suggest_genre_by_mood(user_msg)
+            if mood_based:
+                session["genre"] = mood_based
+        return jsonify({"response": greeting_msg})
 
     # Handle button replies
     if user_msg in GENRE_OPTIONS:
