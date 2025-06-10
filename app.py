@@ -15,7 +15,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 df = pd.read_csv("movies.csv")
 df.dropna(subset=["title", "genres", "runtime_minutes", "adult", "final_score"], inplace=True)
 
-# Define genre list from dataset
+# Extract genre options
 def extract_all_genres():
     genre_set = set()
     for genres in df["genres"].dropna():
@@ -30,123 +30,101 @@ LENGTH_OPTIONS = {
     "long": (121, 1000)
 }
 
-# Session state
 sessions = {}
 
-# Helper: Check if English
+# Only English allowed
 def is_english(text):
     return bool(re.match(r'^[\x00-\x7F\s.,!?\'"-]+$', text))
 
-# Helper: Get mood or context using GPT
+# GPT decides if relevant to movies
 def is_movie_related(user_input):
     try:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             temperature=0,
             messages=[
-                {"role": "system", "content": "You are an assistant that classifies if a message is related to movies or not."},
-                {"role": "user", "content": f"Is the following message about movies or movie recommendations?\n\n'{user_input}'\n\nAnswer 'yes' or 'no' only."}
+                {"role": "system", "content": "Classify if a message is related to movies or recommendations."},
+                {"role": "user", "content": f"Is this message about movies?\n'{user_input}'\nAnswer 'yes' or 'no'."}
             ]
         )
-        reply = response.choices[0].message.content.strip().lower()
-        return "yes" in reply
+        return "yes" in response.choices[0].message.content.lower()
     except:
         return False
 
-# Helper: Extract runtime category
-def get_runtime_category(runtime):
-    for label, (min_r, max_r) in LENGTH_OPTIONS.items():
-        if min_r <= runtime <= max_r:
-            return label
-    return None
-
-# Route
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.get_json()
     messages = data.get("messages", [])
     user_message = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
-
-    # Reject non-English input
-    if not is_english(user_message):
-        return jsonify({"response": "❌ This assistant only understands English. Please try again using English only."})
-
-    # Get session ID (or use IP in real use)
     session_id = data.get("session_id", "default")
+
+    if not is_english(user_message):
+        return jsonify({"response": "❌ English only please."})
+
+    if not is_movie_related(user_message):
+        return jsonify({"response": "🤖 I'm here to help with movie recommendations. Please tell me what genre or type you're looking for!"})
 
     if session_id not in sessions:
         sessions[session_id] = {"genre": None, "length": None, "adult": None}
-
     session = sessions[session_id]
 
-    # Try to detect if related to movies
-    if not is_movie_related(user_message):
-        return jsonify({"response": "🤖 I'm here to help with movie recommendations. Try telling me your mood or what kind of movie you're looking for!"})
-
-    # Try to extract known labels
-    msg_lower = user_message.lower()
-
-    # Detect genre
+    # Try to extract genre
     if not session["genre"]:
         for genre in GENRE_OPTIONS:
-            if genre.lower() in msg_lower:
+            if genre.lower() in user_message.lower():
                 session["genre"] = genre
                 break
 
-    # Detect length
+    # Try to extract length
     if not session["length"]:
-        if "short" in msg_lower:
+        if "short" in user_message.lower():
             session["length"] = "short"
-        elif "medium" in msg_lower:
+        elif "medium" in user_message.lower():
             session["length"] = "medium"
-        elif "long" in msg_lower:
+        elif "long" in user_message.lower():
             session["length"] = "long"
 
-    # Detect adult
-    if not session["adult"]:
-        if "adult" in msg_lower:
+    # Try to extract adult
+    if session["adult"] is None:
+        if "adult" in user_message.lower():
             session["adult"] = True
-        elif "family" in msg_lower or "all ages" in msg_lower or "everyone" in msg_lower:
+        elif "everyone" in user_message.lower() or "family" in user_message.lower():
             session["adult"] = False
 
-    # Ask missing info
+    # Ask for missing info
     if not session["genre"]:
         return jsonify({"response": "[[ASK_GENRE]]"})
-
     if not session["length"]:
         return jsonify({"response": "[[ASK_LENGTH]]"})
-
     if session["adult"] is None:
         return jsonify({"response": "[[ASK_ADULT]]"})
 
-    # All info present — filter
+    # All info present – filter movies
+    genre_filter = session["genre"].lower()
     min_len, max_len = LENGTH_OPTIONS[session["length"]]
-    genre_str = session["genre"].lower()
+    is_adult = session["adult"]
 
     filtered = df[
-        df["genres"].str.lower().str.contains(genre_str) &
-        (df["runtime_minutes"] >= min_len) &
-        (df["runtime_minutes"] <= max_len) &
-        (df["adult"] == session["adult"])
+        df["genres"].str.lower().str.contains(genre_filter) &
+        df["runtime_minutes"].between(min_len, max_len) &
+        (df["adult"] == is_adult)
     ]
 
     if filtered.empty:
-        return jsonify({"response": "😕 Sorry, I couldn't find matching movies. Try changing the genre or length."})
+        return jsonify({"response": "😕 No movies found for your selection. Try a different combination."})
 
-    sample = filtered.sort_values("final_score", ascending=False).head(25)
-    recommendations = []
-
-    for _, row in sample.iterrows():
-        recommendations.append(
+    top_movies = filtered.sort_values("final_score", ascending=False).head(5)
+    results = []
+    for _, row in top_movies.iterrows():
+        results.append(
             f"🎬 {row['title']} ({int(row['release_year'])})\n"
             f"Genre: {row['genres']}\n"
-            f"Duration: {int(row['runtime_minutes'])} minutes\n"
-            f"⭐ Score: {round(row['final_score'], 2)}\n"
+            f"Duration: {int(row['runtime_minutes'])} min\n"
+            f"Score: {round(row['final_score'], 2)}\n"
             f"Overview: {row['overview']}"
         )
 
-    response_text = "\n\n".join(recommendations[:5])
-    return jsonify({"response": response_text})
+    return jsonify({"response": "\n\n".join(results)})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
