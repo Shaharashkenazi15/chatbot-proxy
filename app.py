@@ -1,8 +1,10 @@
+# Updated Flask backend for Smart Movie Chat
 from flask import Flask, request, jsonify
 import pandas as pd
 import openai
 import os
 import re
+import random
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -12,6 +14,7 @@ CORS(app)
 df = pd.read_csv("movies.csv")
 df.dropna(subset=["title", "genres", "runtime", "adult", "final_score", "cluster_id"], inplace=True)
 
+df["adult"] = df["adult"].astype(bool)
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 GENRE_OPTIONS = sorted({g.strip().title()
@@ -35,14 +38,12 @@ def is_english(text):
     return bool(re.match(r'^[\x00-\x7F\s.,!?\'"-]+$', text))
 
 def detect_intent(user_input):
-    prompt = f"""You are a smart assistant. Classify the user intent from this message:
+    prompt = f"""Classify the user intent from this message:
 "{user_input}"
-
 Respond only with:
 - greeting
 - movie_request
-- unrelated
-"""
+- unrelated"""
     try:
         res = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
@@ -60,9 +61,7 @@ Classify the user's {category}:
 - For genre: {', '.join(GENRE_OPTIONS)}
 - For length: Short, Medium, Long
 - For audience: Adults Only, All Audiences
-
-Respond only with one word or 'Unknown'
-"""
+Respond only with one word or 'Unknown'"""
     try:
         res = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
@@ -76,12 +75,11 @@ Respond only with one word or 'Unknown'
 def suggest_genre_by_mood(text):
     prompt = f"""Based on the user's mood in this message: "{text}"
 Which movie genre might help them feel better or match their vibe?
-Choose ONLY from: {', '.join(GENRE_OPTIONS)}. Respond with one word only.
-"""
+Choose ONLY from: {', '.join(GENRE_OPTIONS)}. Respond with one word only."""
     try:
         res = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
-            temperature=0,
+            temperature=0.3,
             messages=[{"role": "user", "content": prompt}]
         )
         result = res.choices[0].message.content.strip()
@@ -103,12 +101,11 @@ def chat():
         SESSIONS[session_id] = {"genre": None, "length": None, "adult": None}
     session = SESSIONS[session_id]
 
-    # Check intent
     intent = detect_intent(user_msg)
     if intent == "greeting":
-        return jsonify({"response": "👋 Hey there! What kind of movie are you in the mood for?"})
+        return jsonify({"response": "👋 Hey! I'm here to help you find the perfect movie. What's your vibe today?"})
     if intent == "unrelated":
-        return jsonify({"response": "🤖 I can only help with movie recommendations. Try telling me your mood or a genre."})
+        return jsonify({"response": "🤖 I'm here to help you discover great movies. Tell me how you're feeling or what you're in the mood for!"})
 
     # Handle button replies
     if user_msg in GENRE_OPTIONS:
@@ -118,7 +115,7 @@ def chat():
     elif user_msg in ADULT_OPTIONS:
         session["adult"] = ADULT_OPTIONS[user_msg]
 
-    # Try classify
+    # Try to classify if not already known
     if not session["genre"]:
         genre = classify(user_msg, "genre")
         if genre in GENRE_OPTIONS:
@@ -142,7 +139,7 @@ def chat():
         elif "all" in a:
             session["adult"] = False
 
-    # Ask missing
+    # Ask for missing info
     if not session["genre"]:
         return jsonify({"response": "[[ASK_GENRE]]"})
     if not session["length"]:
@@ -150,7 +147,7 @@ def chat():
     if session["adult"] is None:
         return jsonify({"response": "[[ASK_ADULT]]"})
 
-    # Final filtering and cluster logic
+    # Filter and recommend from cluster
     genre = session["genre"].lower()
     min_len, max_len = LENGTH_OPTIONS[session["length"]]
     is_adult = session["adult"]
@@ -164,9 +161,10 @@ def chat():
     if filtered.empty:
         return jsonify({"response": "😕 No movies found for your preferences. Try another combo."})
 
-    # Find most common cluster_id in match
     cluster_id = filtered["cluster_id"].mode().iloc[0]
-    result_df = df[df["cluster_id"] == cluster_id].sort_values("final_score", ascending=False).head(25)
+    result_df = df[df["cluster_id"] == cluster_id].copy()
+    sample_size = min(40, len(result_df))
+    result_df = result_df.sample(n=sample_size, weights=result_df["final_score"], random_state=random.randint(1,10000))
 
     response = []
     for _, row in result_df.iterrows():
