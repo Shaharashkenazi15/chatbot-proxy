@@ -32,11 +32,9 @@ LENGTH_OPTIONS = {
 
 sessions = {}
 
-# Only English allowed
 def is_english(text):
     return bool(re.match(r'^[\x00-\x7F\s.,!?\'"-]+$', text))
 
-# GPT decides if relevant to movies
 def is_movie_related(user_input):
     try:
         response = openai.ChatCompletion.create(
@@ -57,6 +55,11 @@ def chat():
     messages = data.get("messages", [])
     user_message = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
     session_id = data.get("session_id", "default")
+
+    # Handle greetings like "hi"
+    greetings = ["hi", "hello", "hey", "what's up", "how are you", "yo", "good morning", "good evening"]
+    if user_message.lower().strip() in greetings:
+        return jsonify({"response": "👋 Hey there! Looking for a movie recommendation today?"})
 
     if not is_english(user_message):
         return jsonify({"response": "❌ English only please."})
@@ -84,7 +87,7 @@ def chat():
         elif "long" in user_message.lower():
             session["length"] = "long"
 
-    # Try to extract adult
+    # Try to extract audience
     if session["adult"] is None:
         if "adult" in user_message.lower():
             session["adult"] = True
