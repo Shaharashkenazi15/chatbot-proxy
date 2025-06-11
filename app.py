@@ -28,9 +28,9 @@ def rating_label(score):
     elif score >= quantiles[0.5]:
         return ("RATING: HIGH", "darkgreen")
     elif score >= quantiles[0.25]:
-        return ("RATING: GOOD", "yellow")
+        return ("RATING: GOOD", "orange")  # Changed from yellow to orange
     else:
-        return ("RATING: NICE", "orange")
+        return ("RATING: NICE", "lightcoral")
 
 # Length options
 LENGTH_OPTIONS = {
@@ -99,7 +99,7 @@ def format_cards(df):
             "title": row["title"],
             "year": int(row["release_year"]),
             "score": label,
-            "genre": row["genre_list"][0].capitalize(),
+            "genre": ", ".join([g.capitalize() for g in row["genre_list"]]),  # show all genres
             "duration": int(row["runtime"]),
             "color": color
         })
@@ -142,7 +142,7 @@ def chat():
         return jsonify({"response": "[[ASK_GENRE]]"})
 
     if user_msg.lower() in GENRE_LIST:
-        session["genres"] = [user_msg.lower()]
+        session["genres"] = [user_msg.lower()]  # always a list of one genre
         session["length"] = None
         return jsonify({"response": "[[ASK_LENGTH]]"})
 
@@ -173,7 +173,7 @@ def chat():
         })
 
     if analysis["genre"]:
-        session["genres"] = [analysis["genre"].lower()]
+        session["genres"] = [analysis["genre"].lower()]  # force as list
         session["length"] = None
         return jsonify({"response": "[[ASK_LENGTH]]"})
 
