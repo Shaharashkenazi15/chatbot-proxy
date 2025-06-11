@@ -32,6 +32,7 @@ LENGTH_OPTIONS = {
     "Over 90 minutes": (91, 1000),
     "Any length is fine": None
 }
+GENRE_LIST = sorted(set(g for sublist in movies_df["genre_list"] for g in sublist))
 
 SESSIONS = {}
 
@@ -81,6 +82,12 @@ def chat():
         SESSIONS[session_id] = {"genre": None, "length": None, "results": None, "pointer": 0}
     session = SESSIONS[session_id]
 
+    # Detect button click genre or length
+    if user_msg.lower() in GENRE_LIST:
+        session["genre"] = user_msg.title()
+    if user_msg in LENGTH_OPTIONS:
+        session["length"] = user_msg
+
     analysis = gpt_analyze(user_msg)
 
     if analysis["intent"] == "unrelated":
@@ -89,9 +96,9 @@ def chat():
     if analysis["intent"] == "greeting":
         return jsonify({"response": "👋 Hey there! Tell me how you're feeling or what kind of movie you're in the mood for."})
 
-    if analysis["genre"]:
+    if not session["genre"] and analysis["genre"]:
         session["genre"] = analysis["genre"].strip().title()
-    if analysis["length"] in LENGTH_OPTIONS:
+    if not session["length"] and analysis["length"] in LENGTH_OPTIONS:
         session["length"] = analysis["length"]
 
     if not session["genre"]:
