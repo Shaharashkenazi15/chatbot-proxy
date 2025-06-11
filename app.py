@@ -33,13 +33,13 @@ SESSIONS = {}
 
 MOOD_GENRE_MAP = {
     "sad": [("Comedy", "A comedy can bring some joy."),
-            ("Fantasy", "Fantasy might help you escape for a while."),
-            ("Animation", "Animation is often light and uplifting.")],
-    "happy": [("Action", "Action fits your energetic vibe!"),
-              ("Comedy", "Even more laughs for your good mood.")],
-    "angry": [("Thriller", "A thriller can match your intense mood."),
-              ("Action", "Channel that energy into an action-packed ride."),
-              ("Crime", "Something gritty might hit the spot.")]
+            ("Fantasy", "Fantasy might help you escape for a while.Now choose the duration :)"),
+            ("Animation", "Animation is often light and uplifting.Now choose the duration :)")],
+    "happy": [("Action", "Action fits your energetic vibe! Now choose the duration :)"),
+              ("Comedy", "Even more laughs for your good mood.Now choose the duration :)")],
+    "angry": [("Thriller", "A thriller can match your intense mood.Now choose the duration :)"),
+              ("Action", "Channel that energy into an action-packed ride.Now choose the duration :)"),
+              ("Crime", "Something gritty might hit the spot.Now choose the duration :)")]
 }
 
 def is_english(text):
