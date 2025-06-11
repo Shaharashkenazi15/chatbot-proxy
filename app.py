@@ -111,7 +111,7 @@ def recommend_movies(session):
     session["mood_message"] = None
     response_text += "\n\n🎬 Here are a few movies we think you'll enjoy:"
     return jsonify({
-        "response": response_text,
+        "response": response_text.strip(),
         "cards": format_cards(session["results"].iloc[:5], session["genre"])
     })
 
@@ -158,10 +158,12 @@ def chat():
             session["mood_message"] = mood_msg
             session["length"] = None
             session["results"] = None
-            return jsonify({
+            response = {
                 "response": mood_msg,
                 "followup": "[[ASK_LENGTH]]"
-            })
+            }
+            session["mood_message"] = None  # ✅ prevent duplicate display
+            return jsonify(response)
 
     if analysis["genre"]:
         session["genre"] = analysis["genre"].strip().title()
