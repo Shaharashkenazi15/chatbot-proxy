@@ -19,15 +19,19 @@ movies_df["genres"] = movies_df["genres"].astype(str)
 movies_df["genre_list"] = movies_df["genres"].apply(lambda x: [g.strip().lower() for g in ast.literal_eval(x)])
 movies_df["runtime"] = movies_df["runtime"].astype(float)
 
-q33 = movies_df["final_score"].quantile(0.33)
-q66 = movies_df["final_score"].quantile(0.66)
+q25 = movies_df["final_score"].quantile(0.25)
+q50 = movies_df["final_score"].quantile(0.50)
+q75 = movies_df["final_score"].quantile(0.75)
+
 def rating_level(score):
-    if score >= q66:
+    if score >= q75:
         return "RATING: VERY HIGH!"
-    elif score >= q33:
+    elif score >= q50:
+        return "RATING: HIGH"
+    elif score >= q25:
         return "RATING: GOOD"
     else:
-        return "RATING: LOW"
+        return "RATING: NICE"
 
 LENGTH_OPTIONS = {
     "Up to 90 minutes": (0, 90),
@@ -50,6 +54,14 @@ MOOD_GENRE_MAP = {
 
 def is_english(text):
     return all(ord(c) < 128 for c in text)
+
+def is_reset_request(text):
+    text = text.lower()
+    return any(phrase in text for phrase in [
+        "something else", "another movie", "different movie", 
+        "new suggestion", "other option", "not in the mood", 
+        "change genre", "show me more", "i changed my mind"
+    ])
 
 def text_to_length(text):
     text = text.lower()
@@ -129,6 +141,17 @@ def chat():
         SESSIONS[session_id] = {"genre": None, "length": None, "results": None, "pointer": 0}
     session = SESSIONS[session_id]
 
+    # reset if user wants a new suggestion
+    if is_reset_request(user_msg):
+        session["genre"] = None
+        session["length"] = None
+        session["results"] = None
+        session["mood_message"] = None
+        return jsonify({
+            "response": "🔄 Let's try something new! What genre are you in the mood for?",
+            "followup": "[[ASK_GENRE]]"
+        })
+
     if user_msg.lower() in GENRE_LIST:
         session["genre"] = user_msg.title()
         session["mood_message"] = None
@@ -162,7 +185,7 @@ def chat():
                 "response": mood_msg,
                 "followup": "[[ASK_LENGTH]]"
             }
-            session["mood_message"] = None  # ✅ prevent duplicate display
+            session["mood_message"] = None
             return jsonify(response)
 
     if analysis["genre"]:
