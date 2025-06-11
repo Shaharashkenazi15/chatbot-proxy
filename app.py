@@ -11,12 +11,23 @@ CORS(app)
 
 # Load data
 df = pd.read_csv("movies.csv")
-df.dropna(subset=["title", "genres", "runtime", "adult", "final_score", "cluster_id", "release_year"], inplace=True)
+df.dropna(subset=["title", "genres", "runtime", "final_score", "cluster_id", "release_year"], inplace=True)
 df["runtime"] = df["runtime"].astype(float)
-df["adult"] = df["adult"].astype(bool)
+df["final_score"] = df["final_score"].astype(float)
+df = df[df["runtime"] >= 60]
+df = df[df["final_score"].between(1.0, 10.0)]  # לשמור על סינון סביר
+if "adult" in df.columns:
+    df = df[df["adult"] == False]
 
+# Normalize final_score
+min_score = df["final_score"].min()
+max_score = df["final_score"].max()
+def normalize_score(score):
+    norm = (score - min_score) / (max_score - min_score)
+    return f"{round(norm * 9 + 1, 1)}/10"
+
+# Settings
 openai.api_key = os.getenv("OPENAI_API_KEY")
-
 GENRE_OPTIONS = sorted({g.strip().title()
     for genre_list in df["genres"]
     for g in str(genre_list).strip("[]").replace("'", "").split(",") if g.strip()})
@@ -27,37 +38,32 @@ LENGTH_OPTIONS = {
     "Long (over 120 min)": (121, 1000)
 }
 
-ADULT_OPTIONS = {
-    "All Audiences": False,
-    "Adults Only": True
-}
-
 MOOD_TO_GENRES = {
-    "sad": ["Comedy", "Romance"],
-    "happy": ["Action", "Comedy"],
-    "angry": ["Thriller", "Action"],
-    "bored": ["Adventure", "Fantasy"],
-    "tired": ["Animation", "Short"],
-    "romantic": ["Romance", "Drama"],
+    "sad": ["Comedy"],
+    "happy": ["Comedy", "Adventure"],
+    "angry": ["Action", "Thriller"],
+    "bored": ["Fantasy", "Animation"],
+    "tired": ["Short", "Family"],
+    "romantic": ["Romance", "Comedy"],
     "default": ["Drama", "Adventure"]
 }
 
 SESSIONS = {}
 
+# Helpers
 def is_english(text):
     return bool(re.match(r'^[\x00-\x7F\s.,!?\'"-]+$', text))
 
 def detect_intent(text):
     prompt = f"""
-Given this message: "{text}"
-Classify the intent:
+Message: "{text}"
+Classify the user's intent:
 - greeting
 - movie_request
 - mood_description
 - more
 - unrelated
-Respond with just one label.
-"""
+Respond with one label only."""
     try:
         res = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
@@ -74,8 +80,7 @@ Message: "{text}"
 Classify the user's {category}:
 - For genre: {', '.join(GENRE_OPTIONS)}
 - For length: Short, Medium, Long
-- For audience: Adults Only, All Audiences
-Respond only with one word or 'Unknown'."""
+Respond with one word or 'Unknown'."""
     try:
         res = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
@@ -86,15 +91,12 @@ Respond only with one word or 'Unknown'."""
     except:
         return "Unknown"
 
-def extract_genre_from_mood(text):
-    mood_text = text.lower()
-    for mood, genres in MOOD_TO_GENRES.items():
-        if mood in mood_text:
+def guess_genre_from_mood(text):
+    mood = text.lower()
+    for keyword, genres in MOOD_TO_GENRES.items():
+        if keyword in mood:
             return random.choice(genres)
     return random.choice(MOOD_TO_GENRES["default"])
-
-def format_score(score):
-    return f"{round(score * 10, 1)}/10"
 
 def format_movie_cards(movie_list):
     cards = []
@@ -102,10 +104,11 @@ def format_movie_cards(movie_list):
         cards.append({
             "title": row["title"],
             "year": int(row["release_year"]),
-            "score": format_score(row["final_score"])
+            "score": normalize_score(row["final_score"])
         })
     return {"cards": cards}
 
+# Routes
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.get_json()
@@ -117,37 +120,19 @@ def chat():
         return jsonify({"response": "❌ English only please."})
 
     if session_id not in SESSIONS:
-        SESSIONS[session_id] = {"genre": None, "length": None, "adult": None, "results": None, "pointer": 0}
+        SESSIONS[session_id] = {"genre": None, "length": None, "results": None, "pointer": 0}
     session = SESSIONS[session_id]
-
-    if user_msg in GENRE_OPTIONS:
-        session["genre"] = user_msg
-        session["results"] = None
-        session["pointer"] = 0
 
     intent = detect_intent(user_msg)
 
+    # greeting
     if intent == "greeting":
-        return jsonify({"response": "👋 Hey! I'm here to help you find the perfect movie. Tell me what you're in the mood for 🎬"})
+        return jsonify({"response": "👋 Hey there! I’d love to help you find a movie. What genre or vibe are you in the mood for?"})
 
-    if intent == "movie_request" and not session["genre"]:
-        return jsonify({"response": "[[ASK_GENRE]]"})
-
-    if intent == "more" and session["results"] is not None:
-        start = session["pointer"]
-        end = start + 5
-        next_batch = session["results"].iloc[start:end]
-        session["pointer"] = end
-        if next_batch.empty:
-            return jsonify({"response": "😕 That’s all I’ve got for now. Try a new genre or mood!"})
-        return jsonify(format_movie_cards(next_batch))
-
-    if not session["genre"]:
-        genre = classify(user_msg, "genre")
-        if genre in GENRE_OPTIONS:
-            session["genre"] = genre
-        else:
-            session["genre"] = extract_genre_from_mood(user_msg)
+    # save quick genre/length
+    genre = classify(user_msg, "genre")
+    if genre in GENRE_OPTIONS:
+        session["genre"] = genre
 
     if not session["length"]:
         l = classify(user_msg, "length").lower()
@@ -156,46 +141,49 @@ def chat():
                 session["length"] = label
                 break
 
-    if session["adult"] is None:
-        a = classify(user_msg, "audience").lower()
-        if "adult" in a:
-            session["adult"] = True
-        elif "all" in a:
-            session["adult"] = False
+    # handle 'more'
+    if intent == "more" and session["results"] is not None:
+        start = session["pointer"]
+        end = start + 5
+        next_batch = session["results"].iloc[start:end]
+        session["pointer"] = end
+        if next_batch.empty:
+            return jsonify({"response": "😕 That’s all I’ve got for now. Try another genre or mood!"})
+        return jsonify(format_movie_cards(next_batch))
 
-    if user_msg in LENGTH_OPTIONS:
-        session["length"] = user_msg
-    if user_msg in ADULT_OPTIONS:
-        session["adult"] = ADULT_OPTIONS[user_msg]
+    # if no genre from text, guess by mood
+    if not session["genre"]:
+        session["genre"] = guess_genre_from_mood(user_msg)
 
+    # if still missing info
     if not session["genre"]:
         return jsonify({"response": "[[ASK_GENRE]]"})
     if not session["length"]:
         return jsonify({"response": "[[ASK_LENGTH]]"})
-    if session["adult"] is None:
-        return jsonify({"response": "[[ASK_ADULT]]"})
 
+    # filter and recommend
     genre = session["genre"].lower()
     min_len, max_len = LENGTH_OPTIONS[session["length"]]
-    is_adult = session["adult"]
 
     filtered = df[
         df["genres"].str.lower().str.contains(genre) &
-        df["runtime"].between(min_len, max_len) &
-        (df["adult"] == is_adult)
+        df["runtime"].between(min_len, max_len)
     ]
 
     if filtered.empty:
-        return jsonify({"response": "😕 I couldn’t find anything that matches those filters. Want to try another genre?"})
+        return jsonify({"response": "😕 I couldn’t find any movies with that combo. Want to try a different vibe or length?"})
 
     cluster_id = filtered["cluster_id"].mode().iloc[0]
-    result_df = df[(df["cluster_id"] == cluster_id) & df["runtime"].between(min_len, max_len)].copy()
-    result_df = result_df.sample(n=min(40, len(result_df)), weights=result_df["final_score"], random_state=random.randint(1, 9999))
+    result_df = df[
+        (df["cluster_id"] == cluster_id) &
+        df["runtime"].between(min_len, max_len)
+    ].copy()
 
+    result_df = result_df.sample(n=min(40, len(result_df)), weights=result_df["final_score"], random_state=random.randint(1, 9999))
     session["results"] = result_df.reset_index(drop=True)
     session["pointer"] = 5
 
-    intro = f"🍿 Great! Since you're into *{session['genre']}* and prefer *{session['length']}* movies, here are some top picks I think you’ll enjoy:"
+    intro = f"🍿 Awesome! Since you're into *{session['genre']}* and prefer *{session['length']}* movies, here are 5 picks I think you'll enjoy:"
     return jsonify({"response": intro, **format_movie_cards(session["results"].iloc[:5])})
 
 @app.route("/genres", methods=["GET"])
