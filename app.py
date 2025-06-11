@@ -103,6 +103,7 @@ def chat():
         SESSIONS[session_id] = {"genre": None, "length": None, "results": None, "pointer": 0}
     session = SESSIONS[session_id]
 
+    # detect intent
     intent = detect_intent(user_msg)
 
     if intent == "greeting" or "happy" in user_msg.lower():
@@ -117,25 +118,31 @@ def chat():
             return jsonify({"response": "🚫 That's all for now. Try a different genre or vibe!"})
         return jsonify(format_movie_cards(next_batch))
 
-    # Try to extract genre
+    # Handle button clicks directly
+    if user_msg in GENRE_OPTIONS:
+        session["genre"] = user_msg
+    elif user_msg in LENGTH_OPTIONS:
+        session["length"] = user_msg
+
+    # Try to classify genre if still missing
     if not session["genre"]:
         g = classify(user_msg, "genre")
         if g in GENRE_OPTIONS:
             session["genre"] = g
 
-    # Try to extract length
+    # Try to classify length if still missing
     if not session["length"]:
         l = classify(user_msg, "length")
         if l in LENGTH_OPTIONS:
             session["length"] = l
 
-    # Ask missing info
+    # Ask for missing info
     if not session["genre"]:
         return jsonify({"response": "[[ASK_GENRE]]"})
     if not session["length"]:
         return jsonify({"response": "[[ASK_LENGTH]]"})
 
-    # Apply filters
+    # Filter movies
     genre = session["genre"].lower()
     length_range = LENGTH_OPTIONS[session["length"]]
 
