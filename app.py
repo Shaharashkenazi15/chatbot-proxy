@@ -47,9 +47,9 @@ def is_english(text):
 
 def text_to_length(text):
     text = text.lower()
-    if any(w in text for w in ["short", "quick", "under 90", "קצר", "קליל", "רגוע"]):
+    if any(w in text for w in ["short", "quick", "under 90", "short", "easy", "chill"]):
         return "Up to 90 minutes"
-    if any(w in text for w in ["long", "epic", "over 90", "ארוך"]):
+    if any(w in text for w in ["long", "epic", "over 90", "long"]):
         return "Over 90 minutes"
     return None
 
