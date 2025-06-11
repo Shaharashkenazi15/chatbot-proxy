@@ -147,15 +147,18 @@ def chat():
     # ✅ mood-to-genre אפילו אם כבר יש genre – נעדכן אם שונה
     mood = analysis.get("mood")
     if mood:
-        new_genre, mood_msg = mood_to_genre(mood)
-        if new_genre and new_genre.lower() != (session.get("genre") or "").lower():
-            session["genre"] = new_genre
-            session["mood_message"] = mood_msg
-            if not session["length"]:
-                return jsonify({
-                    "response": mood_msg,
-                    "followup": "[[ASK_LENGTH]]"
-                })
+    new_genre, mood_msg = mood_to_genre(mood)
+    if new_genre:
+        session["genre"] = new_genre
+        session["mood_message"] = mood_msg
+        session["results"] = None  # תאפס תוצאות קודמות
+        if not session["length"]:
+            return jsonify({
+                "response": mood_msg,
+                "followup": "[[ASK_LENGTH]]"
+            })
+        else:
+            return recommend_movies(session)
 
     if analysis["genre"]:
         session["genre"] = analysis["genre"].strip().title()
