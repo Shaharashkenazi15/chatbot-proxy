@@ -146,15 +146,12 @@ def chat():
         session["length"] = None
         return jsonify({"response": "[[ASK_LENGTH]]"})
 
-    if user_msg.title() in LENGTH_OPTIONS:
-        session["length"] = user_msg.title()
-        if session["genres"]:
-            return recommend_movies(session)
-
-    if user_msg.lower() in LENGTH_OPTIONS:
-        session["length"] = next(k for k in LENGTH_OPTIONS if k.lower() == user_msg.lower())
-        if session["genres"]:
-            return recommend_movies(session)
+    # 🔥 FIX: match all length options without case sensitivity
+    for k in LENGTH_OPTIONS:
+        if user_msg.lower().strip() == k.lower():
+            session["length"] = k
+            if session["genres"]:
+                return recommend_movies(session)
 
     analysis = gpt_analyze(user_msg)
 
