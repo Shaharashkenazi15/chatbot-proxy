@@ -20,7 +20,7 @@ movies_df["genres"] = movies_df["genres"].astype(str)
 movies_df["genre_list"] = movies_df["genres"].apply(lambda x: [g.strip().lower() for g in ast.literal_eval(x)])
 movies_df["runtime"] = movies_df["runtime"].astype(float)
 
-# Normalize rating to max = 10
+# Normalize rating based on max
 max_score = movies_df["final_score"].max()
 def normalize_score(score):
     return f"{round((score / max_score) * 10, 1)}/10"
@@ -112,8 +112,7 @@ def recommend_movies(session):
         filtered = filtered[filtered["runtime"].between(length_range[0], length_range[1])]
 
     if filtered.empty:
-        count = movies_df[movies_df["genre_list"].apply(lambda g: genre in g)].shape[0]
-        return jsonify({"response": f"😕 Couldn't find matching movies. There are {count} movies with the genre '{genre}', but none matching your length filter."})
+        return jsonify({"response": f"😕 Couldn't find matching movies for {genre} with that length."})
 
     session["results"] = filtered.sample(frac=1, random_state=random.randint(1,999)).reset_index(drop=True)
     session["pointer"] = 5
@@ -168,6 +167,10 @@ def chat():
         if mood_genre:
             session["genre"] = mood_genre
             session["mood_message"] = mood_message
+
+            if not session["length"]:
+                response = f"{mood_message}\n\nPlease choose how long the movie should be:"
+                return jsonify({"response": response})
 
     if analysis["genre"]:
         session["genre"] = analysis["genre"].strip().title()
