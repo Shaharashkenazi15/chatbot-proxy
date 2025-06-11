@@ -95,8 +95,10 @@ def recommend_movies(session):
     if length_range:
         filtered = filtered[filtered["runtime"].between(length_range[0], length_range[1])]
 
+    # Debug if empty
     if filtered.empty:
-        return jsonify({"response": "😕 Couldn't find movies with that combo. Try another mood or genre."})
+        count = movies_df[movies_df["genre_list"].apply(lambda g: genre in g)].shape[0]
+        return jsonify({"response": f"😕 Couldn't find matching movies. There are {count} movies with the genre '{genre}', but none matching your length filter."})
 
     session["results"] = filtered.sample(frac=1, random_state=random.randint(1,999)).reset_index(drop=True)
     session["pointer"] = 5
@@ -125,8 +127,10 @@ def chat():
         SESSIONS[session_id] = {"genre": None, "length": None, "results": None, "pointer": 0}
     session = SESSIONS[session_id]
 
+    # Detect if user chose genre/length from buttons
     if user_msg.lower() in GENRE_LIST:
         session["genre"] = user_msg.title()
+        session["mood_message"] = None
     if user_msg in LENGTH_OPTIONS:
         session["length"] = user_msg
 
@@ -141,14 +145,18 @@ def chat():
     if analysis["intent"] == "greeting":
         return jsonify({"response": "👋 Hey there! Tell me how you're feeling or what kind of movie you're in the mood for."})
 
+    # Update genre from mood if no genre yet
     if not session["genre"]:
         mood_genre, mood_message = mood_to_genre(analysis["mood"])
         if mood_genre:
             session["genre"] = mood_genre
             session["mood_message"] = mood_message
 
-    if not session["genre"] and analysis["genre"]:
+    # Always update genre if user says it explicitly
+    if analysis["genre"]:
         session["genre"] = analysis["genre"].strip().title()
+        session["mood_message"] = None  # cancel previous mood message if user changed genre
+
     if not session["length"] and analysis["length"] in LENGTH_OPTIONS:
         session["length"] = analysis["length"]
 
