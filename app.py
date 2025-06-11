@@ -20,12 +20,10 @@ movies_df["genres"] = movies_df["genres"].astype(str)
 movies_df["genre_list"] = movies_df["genres"].apply(lambda x: [g.strip().lower() for g in ast.literal_eval(x)])
 movies_df["runtime"] = movies_df["runtime"].astype(float)
 
-# Normalize score
-min_score = movies_df["final_score"].min()
+# Normalize rating to max = 10
 max_score = movies_df["final_score"].max()
 def normalize_score(score):
-    norm = (score - min_score) / (max_score - min_score)
-    return f"{round(norm * 4 + 6, 1)}/10"
+    return f"{round((score / max_score) * 10, 1)}/10"
 
 LENGTH_OPTIONS = {
     "Up to 90 minutes": (0, 90),
@@ -35,7 +33,6 @@ LENGTH_OPTIONS = {
 GENRE_LIST = sorted(set(g for sublist in movies_df["genre_list"] for g in sublist if g != "adventure"))
 SESSIONS = {}
 
-# Map mood to multiple genres + messages
 MOOD_GENRE_MAP = {
     "sad": [
         ("Comedy", "A comedy can bring some joy."),
@@ -44,8 +41,8 @@ MOOD_GENRE_MAP = {
     ],
     "happy": [
         ("Action", "Action fits your energetic vibe!"),
-        ("Adventure", "Let’s go on an adventure with you!"),
-        ("Comedy", "Even more laughs for your good mood.")
+        ("Comedy", "Even more laughs for your good mood."),
+        ("Adventure", "Let’s go on an adventure with you!")
     ],
     "angry": [
         ("Thriller", "A thriller can match your intense mood."),
@@ -89,8 +86,7 @@ Respond in JSON like:
             temperature=0,
             messages=[{"role": "user", "content": prompt}]
         )
-        content = res.choices[0].message.content.strip()
-        return json.loads(content)
+        return json.loads(res.choices[0].message.content.strip())
     except Exception as e:
         print("GPT Error:", e)
         return {"intent": "unrelated", "mood": None, "genre": None, "length": None}
@@ -102,7 +98,8 @@ def format_cards(df, genre=None):
             "title": row["title"],
             "year": int(row["release_year"]),
             "score": normalize_score(row["final_score"]),
-            "genre": genre.title() if genre else row["genre_list"][0].capitalize()
+            "genre": genre.title() if genre else row["genre_list"][0].capitalize(),
+            "duration": int(row["runtime"])
         })
     return cards
 
@@ -122,7 +119,7 @@ def recommend_movies(session):
     session["pointer"] = 5
 
     response_text = f"🎬 Here are some *{session['genre']}* movies {session['length']}:"
-    if "mood_message" in session and session["mood_message"]:
+    if session.get("mood_message"):
         response_text = f"{session['mood_message']}\n\n" + response_text
         session["mood_message"] = None
 
@@ -145,7 +142,6 @@ def chat():
         SESSIONS[session_id] = {"genre": None, "length": None, "results": None, "pointer": 0}
     session = SESSIONS[session_id]
 
-    # Detect genre or length manually clicked
     if user_msg.lower() in GENRE_LIST:
         session["genre"] = user_msg.title()
         session["mood_message"] = None
@@ -154,7 +150,6 @@ def chat():
 
     analysis = gpt_analyze(user_msg)
 
-    # Fallback: detect length from casual language
     if not session["length"]:
         text_length = text_to_length(user_msg)
         if text_length:
@@ -163,20 +158,17 @@ def chat():
     if analysis["intent"] == "unrelated":
         if session["genre"] and session["length"]:
             return recommend_movies(session)
-        else:
-            return jsonify({"response": "🤖 I'm here to help with movie recommendations. Tell me your mood or genre!"})
+        return jsonify({"response": "🤖 I'm here to help with movie recommendations. Tell me your mood or genre!"})
 
     if analysis["intent"] == "greeting":
         return jsonify({"response": "👋 Hey there! Tell me how you're feeling or what kind of movie you're in the mood for."})
 
-    # Apply mood → genre if genre not set
     if not session["genre"]:
         mood_genre, mood_message = mood_to_genre(analysis["mood"])
         if mood_genre:
             session["genre"] = mood_genre
             session["mood_message"] = mood_message
 
-    # Override genre if new one provided
     if analysis["genre"]:
         session["genre"] = analysis["genre"].strip().title()
         session["mood_message"] = None
