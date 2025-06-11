@@ -2,21 +2,23 @@ from flask import Flask, request, jsonify
 import pandas as pd
 import openai
 import os
-import re
 import random
+import re
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
-# Load dataset
+# Load data
 df = pd.read_csv("movies.csv")
 df.dropna(subset=["title", "genres", "runtime", "adult", "final_score", "cluster_id"], inplace=True)
 df["runtime"] = df["runtime"].astype(float)
 df["adult"] = df["adult"].astype(bool)
 
+# Set API key
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+# Constants
 GENRE_OPTIONS = sorted({g.strip().title()
     for genre_list in df["genres"]
     for g in str(genre_list).strip("[]").replace("'", "").split(",") if g.strip()})
@@ -38,25 +40,27 @@ MOOD_TO_GENRES = {
     "angry": ["Thriller", "Action"],
     "bored": ["Adventure", "Fantasy"],
     "tired": ["Animation", "Short"],
+    "romantic": ["Romance", "Drama"],
     "default": ["Drama", "Adventure"]
 }
 
 SESSIONS = {}
 
+# Helpers
 def is_english(text):
     return bool(re.match(r'^[\x00-\x7F\s.,!?\'"-]+$', text))
 
-def detect_intent(user_input):
-    if user_input.strip().lower() in ["more", "more please", "next"]:
-        return "more"
-    if user_input.strip().lower() in ["hi", "hello", "hey"]:
-        return "greeting"
-    prompt = f"""Classify the user intent from this message:
-"{user_input}"
-Respond only with:
+def detect_intent_gpt(text):
+    prompt = f"""
+Given this message: "{text}"
+Classify the intent:
 - greeting
 - movie_request
-- unrelated"""
+- mood_description
+- more
+- unrelated
+Respond with just one label.
+"""
     try:
         res = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
@@ -74,7 +78,7 @@ Classify the user's {category}:
 - For genre: {', '.join(GENRE_OPTIONS)}
 - For length: Short, Medium, Long
 - For audience: Adults Only, All Audiences
-Respond only with one word or 'Unknown'"""
+Respond only with one word or 'Unknown'."""
     try:
         res = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
@@ -85,10 +89,10 @@ Respond only with one word or 'Unknown'"""
     except:
         return "Unknown"
 
-def guess_genre_from_mood(text):
-    mood = text.lower()
-    for keyword, genres in MOOD_TO_GENRES.items():
-        if keyword in mood:
+def extract_genre_from_mood(text):
+    mood_text = text.lower()
+    for mood, genres in MOOD_TO_GENRES.items():
+        if mood in mood_text:
             return random.choice(genres)
     return random.choice(MOOD_TO_GENRES["default"])
 
@@ -104,6 +108,7 @@ def format_movies(movie_list):
         )
     return "\n\n".join(response)
 
+# Main chat endpoint
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.get_json()
@@ -118,33 +123,27 @@ def chat():
         SESSIONS[session_id] = {"genre": None, "length": None, "adult": None, "results": None, "pointer": 0}
     session = SESSIONS[session_id]
 
-    # Handle "more"
-    if detect_intent(user_msg) == "more" and session.get("results") is not None:
+    # Detect intent
+    intent = detect_intent_gpt(user_msg)
+
+    if intent == "greeting":
+        return jsonify({"response": "👋 Hey! I'm here to help you find the perfect movie. What's your mood or vibe today?"})
+
+    if intent == "more" and session["results"] is not None:
         start = session["pointer"]
         end = start + 5
         next_batch = session["results"].iloc[start:end]
         session["pointer"] = end
         if next_batch.empty:
-            return jsonify({"response": "🚫 No more results. Try a new mood or genre!"})
+            return jsonify({"response": "🚫 No more results. Try another mood or genre!"})
         return jsonify({"response": format_movies(next_batch)})
 
-    # Detect intent
-    intent = detect_intent(user_msg)
-    if intent == "unrelated":
-        return jsonify({"response": "🤖 I'm here to help with movie recommendations. Tell me how you're feeling or what kind of movie you'd like."})
-    if intent == "greeting":
-        if session["genre"] and session["length"] and session["adult"] is not None:
-            pass  # יש הכול – אל תחזור לברכה
-        else:
-            return jsonify({"response": "👋 Hey! I'm here to help you find the perfect movie. What's your vibe today?"})
-
-    # Try to classify inputs
     if not session["genre"]:
         genre = classify(user_msg, "genre")
         if genre in GENRE_OPTIONS:
             session["genre"] = genre
         else:
-            session["genre"] = guess_genre_from_mood(user_msg)
+            session["genre"] = extract_genre_from_mood(user_msg)
 
     if not session["length"]:
         l = classify(user_msg, "length").lower()
@@ -160,7 +159,7 @@ def chat():
         elif "all" in a:
             session["adult"] = False
 
-    # Button replies
+    # Handle direct option selections
     if user_msg in GENRE_OPTIONS:
         session["genre"] = user_msg
     elif user_msg in LENGTH_OPTIONS:
@@ -168,7 +167,7 @@ def chat():
     elif user_msg in ADULT_OPTIONS:
         session["adult"] = ADULT_OPTIONS[user_msg]
 
-    # Ask for missing info
+    # Ask for missing
     if not session["genre"]:
         return jsonify({"response": "[[ASK_GENRE]]"})
     if not session["length"]:
@@ -176,7 +175,7 @@ def chat():
     if session["adult"] is None:
         return jsonify({"response": "[[ASK_ADULT]]"})
 
-    # Recommend movies
+    # Filter and recommend
     genre = session["genre"].lower()
     min_len, max_len = LENGTH_OPTIONS[session["length"]]
     is_adult = session["adult"]
@@ -188,18 +187,23 @@ def chat():
     ]
 
     if filtered.empty:
-        return jsonify({"response": "😕 No movies found for your preferences. Try another vibe!"})
+        return jsonify({"response": "😕 No movies found for your preferences. Try another mood or genre!"})
 
     cluster_id = filtered["cluster_id"].mode().iloc[0]
-    result_df = df[df["cluster_id"] == cluster_id].copy()
-    result_df = result_df[result_df["runtime"].between(min_len, max_len)]
+    result_df = df[(df["cluster_id"] == cluster_id) & df["runtime"].between(min_len, max_len)].copy()
+
     sample_size = min(40, len(result_df))
-    result_df = result_df.sample(n=sample_size, weights=result_df["final_score"], random_state=random.randint(1, 10000))
+    result_df = result_df.sample(n=sample_size, weights=result_df["final_score"], random_state=random.randint(1, 9999))
 
     session["results"] = result_df.reset_index(drop=True)
     session["pointer"] = 5
 
     return jsonify({"response": format_movies(session["results"].iloc[:5])})
+
+# Genres API for dynamic buttons
+@app.route("/genres", methods=["GET"])
+def get_genres():
+    return jsonify(sorted(GENRE_OPTIONS))
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
