@@ -12,6 +12,7 @@ CORS(app)
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+# Load and clean movie data
 movies_df = pd.read_csv("movies.csv")
 movies_df = movies_df.dropna(subset=["title", "genres", "runtime", "overview", "release_year", "final_score"])
 movies_df = movies_df[movies_df["adult"] == 0]
@@ -19,7 +20,7 @@ movies_df["genres"] = movies_df["genres"].astype(str)
 movies_df["genre_list"] = movies_df["genres"].apply(lambda x: [g.strip().lower() for g in ast.literal_eval(x)])
 movies_df["runtime"] = movies_df["runtime"].astype(float)
 
-# דירוג מילולי לפי שלישים
+# Rating level by quantiles
 q33 = movies_df["final_score"].quantile(0.33)
 q66 = movies_df["final_score"].quantile(0.66)
 def rating_level(score):
@@ -30,6 +31,7 @@ def rating_level(score):
     else:
         return "RATING: LOW"
 
+# Options
 LENGTH_OPTIONS = {
     "Up to 90 minutes": (0, 90),
     "Over 90 minutes": (91, 1000),
@@ -38,23 +40,25 @@ LENGTH_OPTIONS = {
 GENRE_LIST = sorted(set(g for sublist in movies_df["genre_list"] for g in sublist if g != "adventure"))
 SESSIONS = {}
 
+# Mood → genre & message (friendly, inviting)
 MOOD_GENRE_MAP = {
-    "sad": [("Comedy", "A comedy can bring some joy."),
-            ("Fantasy", "Fantasy might help you escape for a while."),
-            ("Animation", "Animation is often light and uplifting.")],
-    "happy": [("Action", "Action fits your energetic vibe!"),
-              ("Comedy", "Even more laughs for your good mood.")],
-    "angry": [("Thriller", "A thriller can match your intense mood."),
-              ("Action", "Channel that energy into an action-packed ride."),
-              ("Crime", "Something gritty might hit the spot.")]
+    "sad": [("Comedy", "🌈 Here's something light and uplifting to brighten your mood.\nChoose the duration below 👇"),
+            ("Fantasy", "✨ Let's escape reality for a bit with something magical.\nChoose the duration below 👇"),
+            ("Animation", "🎨 A colorful world might bring a smile.\nChoose the duration below 👇")],
+    "happy": [("Action", "⚡ Ride the wave of your good vibes with some action!\nChoose the duration below 👇"),
+              ("Comedy", "😄 Keep the joy rolling with more laughs.\nChoose the duration below 👇")],
+    "angry": [("Thriller", "🔥 Let’s channel that energy into something intense.\nChoose the duration below 👇"),
+              ("Action", "💥 Time for something fast-paced and powerful.\nChoose the duration below 👇"),
+              ("Crime", "🎭 Gritty stories that match your fierce vibe.\nChoose the duration below 👇")]
 }
 
+# Utility
 def is_english(text):
     return all(ord(c) < 128 for c in text)
 
 def text_to_length(text):
     text = text.lower()
-    if any(w in text for w in ["short", "quick", "under 90", "easy", "chill", "קצר", "קליל", "רגוע"]):
+    if any(w in text for w in ["short", "quick", "under 90", "easy", "chill", "קצר", "רגוע", "קליל"]):
         return "Up to 90 minutes"
     if any(w in text for w in ["long", "epic", "over 90", "ארוך"]):
         return "Over 90 minutes"
@@ -64,12 +68,12 @@ def mood_to_genre(mood):
     mood = (mood or "").lower()
     if mood in MOOD_GENRE_MAP:
         genre, message = random.choice(MOOD_GENRE_MAP[mood])
-        return genre, f"💡 You seem {mood}. {message}"
+        return genre, message
     return None, None
 
 def gpt_analyze(text):
     prompt = f"""
-Analyze this user message even with grammar issues: "{text}"
+Analyze this user message (even with grammar issues): "{text}"
 Return JSON with:
 - intent: greeting, movie_request, mood_description, unrelated
 - mood: if relevant (like sad, happy, angry, bored), else null
@@ -116,6 +120,7 @@ def recommend_movies(session):
         "cards": format_cards(session["results"].iloc[:5], session["genre"])
     })
 
+# Chat route
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.get_json()
@@ -130,14 +135,17 @@ def chat():
         SESSIONS[session_id] = {"genre": None, "length": None, "results": None, "pointer": 0}
     session = SESSIONS[session_id]
 
+    # Handle fixed button inputs
     if user_msg.lower() in GENRE_LIST:
         session["genre"] = user_msg.title()
         session["mood_message"] = None
     if user_msg in LENGTH_OPTIONS:
         session["length"] = user_msg
 
+    # Run GPT analysis
     analysis = gpt_analyze(user_msg)
 
+    # Try to infer length from free-text
     if not session["length"]:
         guessed = text_to_length(user_msg)
         if guessed:
@@ -151,31 +159,28 @@ def chat():
     if analysis["intent"] == "greeting":
         return jsonify({"response": "👋 Hey there! What kind of movie are you in the mood for?"})
 
-    # Always react to mood (even if genre already set)
+    # Mood analysis → genre + response
     mood = analysis.get("mood")
     if mood:
         new_genre, mood_msg = mood_to_genre(mood)
         if new_genre:
             session["genre"] = new_genre
             session["mood_message"] = mood_msg
+            session["length"] = None  # force re-ask for time
             session["results"] = None
-            if not session.get("length"):
-                return jsonify({
-                    "response": mood_msg,
-                    "followup": "[[ASK_LENGTH]]"
-                })
-            else:
-                response = recommend_movies(session).get_json()
-                response["response"] = f"{mood_msg}\n\n{response['response']}"
-                return jsonify(response)
+            return jsonify({
+                "response": mood_msg,
+                "followup": "[[ASK_LENGTH]]"
+            })
 
+    # Use genre/length from analysis if needed
     if analysis["genre"]:
         session["genre"] = analysis["genre"].strip().title()
         session["mood_message"] = None
-
     if not session["length"] and analysis["length"] in LENGTH_OPTIONS:
         session["length"] = analysis["length"]
 
+    # Ask for missing info
     if not session["genre"]:
         return jsonify({"response": "[[ASK_GENRE]]"})
     if not session["length"]:
@@ -183,6 +188,7 @@ def chat():
 
     return recommend_movies(session)
 
+# Load more
 @app.route("/more", methods=["POST"])
 def more():
     session = SESSIONS.get(request.get_json().get("session_id", "default"))
@@ -198,6 +204,7 @@ def more():
         "cards": format_cards(batch, session["genre"])
     })
 
+# Summary
 @app.route("/summary", methods=["POST"])
 def summary():
     title = request.get_json().get("title", "").lower()
