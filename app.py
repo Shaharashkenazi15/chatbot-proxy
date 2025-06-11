@@ -119,7 +119,7 @@ def chat():
     data = request.get_json()
     messages = data.get("messages", [])
     session_id = data.get("session_id", "default")
-    user_msg = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "").strip().lower()
+    user_msg = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "").strip()
 
     if not is_english(user_msg):
         return jsonify({"response": "⚠️ Please write in English only."})
@@ -128,23 +128,22 @@ def chat():
         SESSIONS[session_id] = {"genres": None, "length": None, "results": None, "pointer": 0}
     session = SESSIONS[session_id]
 
-    # RESET on "something else"
-    if any(kw in user_msg for kw in ["something else", "another option", "change it", "different movie"]):
+    if any(kw in user_msg.lower() for kw in ["something else", "another option", "change it", "different movie"]):
         session["genres"] = None
         session["length"] = None
         session["results"] = None
         session["pointer"] = 0
         return jsonify({"response": "[[ASK_GENRE]]"})
 
-    if user_msg in LENGTH_OPTIONS:
-        session["length"] = user_msg
-        if session["genres"]:
-            return recommend_movies(session)
-
-    if user_msg in GENRE_LIST:
-        session["genres"] = [user_msg]
+    if user_msg.lower() in GENRE_LIST:
+        session["genres"] = [user_msg.lower()]
         session["length"] = None
         return jsonify({"response": "[[ASK_LENGTH]]"})
+
+    if user_msg.title() in LENGTH_OPTIONS:
+        session["length"] = user_msg.title()
+        if session["genres"]:
+            return recommend_movies(session)
 
     analysis = gpt_analyze(user_msg)
 
