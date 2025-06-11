@@ -47,7 +47,13 @@ MOOD_GENRE_MAP = {
     "angry": ["thriller", "action", "crime"],
     "romantic": ["romance", "drama"],
     "bored": ["mystery", "adventure", "fantasy"],
-    "excited": ["sci-fi", "action", "adventure"],
+    "excited": ["sci-fi", "action", "adventure"]
+}
+
+MOOD_ALIAS = {
+    "mad": "angry",
+    "furious": "angry",
+    "glad": "happy"
 }
 
 SESSIONS = {}
@@ -145,6 +151,11 @@ def chat():
         if session["genres"]:
             return recommend_movies(session)
 
+    if user_msg.lower() in LENGTH_OPTIONS:
+        session["length"] = next(k for k in LENGTH_OPTIONS if k.lower() == user_msg.lower())
+        if session["genres"]:
+            return recommend_movies(session)
+
     analysis = gpt_analyze(user_msg)
 
     if not session["length"]:
@@ -152,11 +163,15 @@ def chat():
         if guessed:
             session["length"] = guessed
 
-    if analysis["mood"] in MOOD_GENRE_MAP:
-        session["genres"] = MOOD_GENRE_MAP[analysis["mood"]]
+    mood = (analysis["mood"] or "").lower()
+    if mood in MOOD_ALIAS:
+        mood = MOOD_ALIAS[mood]
+
+    if mood in MOOD_GENRE_MAP:
+        session["genres"] = MOOD_GENRE_MAP[mood]
         session["length"] = None
         return jsonify({
-            "response": f"💡 Feeling {analysis['mood']}? Let's find you something great! 🎬\nChoose the duration for your movie below 👇",
+            "response": f"💡 Feeling {mood}? Let's find you something great! 🎬\nChoose the duration for your movie below 👇",
             "followup": "[[ASK_LENGTH]]"
         })
 
