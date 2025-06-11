@@ -33,13 +33,13 @@ SESSIONS = {}
 
 MOOD_GENRE_MAP = {
     "sad": [("Comedy", "A comedy can bring some joy."),
-            ("Fantasy", "Fantasy might help you escape for a while. Now choose the duration :)"),
-            ("Animation", "Animation is often light and uplifting. Now choose the duration :)")],
-    "happy": [("Action", "Action fits your energetic vibe! Now choose the duration :)"),
-              ("Comedy", "Even more laughs for your good mood. Now choose the duration :)")],
-    "angry": [("Thriller", "A thriller can match your intense mood. Now choose the duration :)"),
-              ("Action", "Channel that energy into an action-packed ride. Now choose the duration :)"),
-              ("Crime", "Something gritty might hit the spot. Now choose the duration :)")]
+            ("Fantasy", "Fantasy might help you escape for a while."),
+            ("Animation", "Animation is often light and uplifting.")],
+    "happy": [("Action", "Action fits your energetic vibe!"),
+              ("Comedy", "Even more laughs for your good mood.")],
+    "angry": [("Thriller", "A thriller can match your intense mood."),
+              ("Action", "Channel that energy into an action-packed ride."),
+              ("Crime", "Something gritty might hit the spot.")]
 }
 
 def is_english(text):
@@ -47,9 +47,9 @@ def is_english(text):
 
 def text_to_length(text):
     text = text.lower()
-    if any(w in text for w in ["short", "quick", "under 90", "short", "easy", "chill"]):
+    if any(w in text for w in ["short", "quick", "under 90", "easy", "chill", "קצר", "קליל", "רגוע"]):
         return "Up to 90 minutes"
-    if any(w in text for w in ["long", "epic", "over 90", "long"]):
+    if any(w in text for w in ["long", "epic", "over 90", "ארוך"]):
         return "Over 90 minutes"
     return None
 
@@ -65,7 +65,7 @@ def gpt_analyze(text):
 Given the message: "{text}"
 Classify the intent and extract info:
 - intent: greeting, movie_request, mood_description, unrelated
-- mood: if relevant (like sad, happy, romantic), else null
+- mood: if relevant (like sad, happy, romantic, angry), else null
 - genre: if mentioned (like action, comedy), else null
 - length: "Up to 90 minutes", "Over 90 minutes", "Any length is fine" or null
 Respond in JSON like:
@@ -82,13 +82,13 @@ Respond in JSON like:
         return {"intent": "unrelated", "mood": None, "genre": None, "length": None}
 
 def format_cards(df, genre=None):
-    return [ {
+    return [{
         "title": row["title"],
         "year": int(row["release_year"]),
         "score": normalize_score(row["final_score"]),
         "genre": genre.title() if genre else row["genre_list"][0].capitalize(),
         "duration": int(row["runtime"])
-    } for _, row in df.iterrows() ]
+    } for _, row in df.iterrows()]
 
 def recommend_movies(session):
     genre = session["genre"].lower()
@@ -144,21 +144,21 @@ def chat():
     if analysis["intent"] == "greeting":
         return jsonify({"response": "👋 Hey there! What kind of movie are you in the mood for?"})
 
-    # ✅ mood-to-genre אפילו אם כבר יש genre – נעדכן אם שונה
+    # ✅ mood → update genre + mood_message always
     mood = analysis.get("mood")
     if mood:
-    new_genre, mood_msg = mood_to_genre(mood)
-    if new_genre:
-        session["genre"] = new_genre
-        session["mood_message"] = mood_msg
-        session["results"] = None  # תאפס תוצאות קודמות
-        if not session["length"]:
-            return jsonify({
-                "response": mood_msg,
-                "followup": "[[ASK_LENGTH]]"
-            })
-        else:
-            return recommend_movies(session)
+        new_genre, mood_msg = mood_to_genre(mood)
+        if new_genre:
+            session["genre"] = new_genre
+            session["mood_message"] = mood_msg
+            session["results"] = None  # clear previous results
+            if not session["length"]:
+                return jsonify({
+                    "response": mood_msg,
+                    "followup": "[[ASK_LENGTH]]"
+                })
+            else:
+                return recommend_movies(session)
 
     if analysis["genre"]:
         session["genre"] = analysis["genre"].strip().title()
