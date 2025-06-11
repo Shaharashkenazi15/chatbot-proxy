@@ -18,12 +18,12 @@ df = df[df["runtime"] >= 60]
 if "adult" in df.columns:
     df = df[df["adult"] == False]
 
-# Normalize score
+# Normalize score: scaled to 6.0–10.0 for display
 min_score = df["final_score"].min()
 max_score = df["final_score"].max()
 def normalize_score(score):
     norm = (score - min_score) / (max_score - min_score)
-    return f"{round(norm * 9 + 1, 1)}/10"
+    return f"{round(norm * 4 + 6, 1)}/10"
 
 # Config
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -33,9 +33,9 @@ GENRE_OPTIONS = sorted({g.strip().title()
     for g in str(genre_list).strip("[]").replace("'", "").split(",") if g.strip()})
 
 LENGTH_OPTIONS = {
-    "Short (up to 90 min)": (0, 90),
-    "Medium (91-120 min)": (91, 120),
-    "Long (over 120 min)": (121, 1000)
+    "עד 90 דקות": (0, 90),
+    "מעל 90 דקות": (91, 1000),
+    "לא משנה לי האורך": None
 }
 
 MOOD_TO_GENRES = {
@@ -79,8 +79,8 @@ def classify(text, category):
 Message: "{text}"
 Classify the user's {category}:
 - For genre: {', '.join(GENRE_OPTIONS)}
-- For length: Short, Medium, Long
-Respond with one word or 'Unknown'."""
+- For length: עד 90 דקות, מעל 90 דקות, לא משנה לי האורך
+Respond with one phrase or 'Unknown'."""
     try:
         res = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
@@ -125,8 +125,9 @@ def chat():
 
     intent = detect_intent(user_msg)
 
-    if intent == "greeting":
-        return jsonify({"response": "👋 Hey there! Tell me what kind of movie you’re in the mood for 🎬"})
+    # Greeting
+    if intent == "greeting" or "happy" in user_msg.lower():
+        return jsonify({"response": "😄 I love that energy! Let's keep the good vibes going – what kind of movie or length are you in the mood for?"})
 
     if intent == "more" and session["results"] is not None:
         start = session["pointer"]
@@ -134,10 +135,10 @@ def chat():
         next_batch = session["results"].iloc[start:end]
         session["pointer"] = end
         if next_batch.empty:
-            return jsonify({"response": "🙁 That’s all I’ve got for now. Try a new vibe or genre!"})
+            return jsonify({"response": "🚫 That's all for now. Try a different genre or vibe!"})
         return jsonify(format_movie_cards(next_batch))
 
-    # Try to extract genre and length
+    # Extract genre
     if not session["genre"]:
         g = classify(user_msg, "genre")
         if g in GENRE_OPTIONS:
@@ -145,12 +146,11 @@ def chat():
         else:
             session["genre"] = guess_genre_from_mood(user_msg)
 
+    # Extract length
     if not session["length"]:
-        l = classify(user_msg, "length").lower()
-        for label in LENGTH_OPTIONS:
-            if l in label.lower():
-                session["length"] = label
-                break
+        l = classify(user_msg, "length")
+        if l in LENGTH_OPTIONS:
+            session["length"] = l
 
     if not session["genre"]:
         return jsonify({"response": "[[ASK_GENRE]]"})
@@ -158,15 +158,15 @@ def chat():
         return jsonify({"response": "[[ASK_LENGTH]]"})
 
     genre = session["genre"].lower()
-    min_len, max_len = LENGTH_OPTIONS[session["length"]]
+    length_range = LENGTH_OPTIONS[session["length"]]
 
-    filtered = df[
-        df["genres"].str.lower().str.contains(genre) &
-        df["runtime"].between(min_len, max_len)
-    ]
+    filtered = df[df["genres"].str.lower().str.contains(genre)]
+
+    if length_range:
+        filtered = filtered[filtered["runtime"].between(length_range[0], length_range[1])]
 
     if filtered.empty:
-        return jsonify({"response": "😕 I couldn’t find any movies for that combo. Want to try a different vibe or length?"})
+        return jsonify({"response": "😕 I couldn’t find anything with that combo. Try a new vibe or genre?"})
 
     result_df = filtered.copy()
     result_df = result_df.sample(n=min(40, len(result_df)), weights=result_df["final_score"], random_state=random.randint(1, 9999))
@@ -174,7 +174,7 @@ def chat():
     session["results"] = result_df.reset_index(drop=True)
     session["pointer"] = 5
 
-    intro = f"🎥 Great choice! Since you're into *{session['genre']}* and prefer *{session['length']}* movies, here are a few I think you'll enjoy:"
+    intro = f"🍿 Based on your vibe – *{session['genre']}*, {session['length']} – here are some great picks:"
     return jsonify({"response": intro, **format_movie_cards(session["results"].iloc[:5])})
 
 @app.route("/genres", methods=["GET"])
