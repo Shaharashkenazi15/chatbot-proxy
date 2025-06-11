@@ -4,6 +4,7 @@ import openai
 import os
 import random
 import json
+import ast
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -16,7 +17,7 @@ movies_df = pd.read_csv("movies.csv")
 movies_df = movies_df.dropna(subset=["title", "genres", "runtime", "overview", "release_year", "final_score"])
 movies_df = movies_df[movies_df["adult"] == 0]
 movies_df["genres"] = movies_df["genres"].astype(str)
-movies_df["genre_list"] = movies_df["genres"].apply(lambda x: [g.strip().lower() for g in x.split(",")])
+movies_df["genre_list"] = movies_df["genres"].apply(lambda x: [g.strip().lower() for g in ast.literal_eval(x)])
 movies_df["runtime"] = movies_df["runtime"].astype(float)
 
 # Normalize scores to 6–10
