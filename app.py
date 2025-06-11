@@ -1,4 +1,3 @@
-# שים את זה במקום הקודם
 from flask import Flask, request, jsonify
 import pandas as pd
 import openai
@@ -10,13 +9,12 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# טען את הנתונים
+# Load data
 df = pd.read_csv("movies.csv")
-df.dropna(subset=["title", "genres", "runtime", "adult", "final_score", "cluster_id", "poster_path"], inplace=True)
+df.dropna(subset=["title", "genres", "runtime", "adult", "final_score", "cluster_id", "release_year"], inplace=True)
 df["runtime"] = df["runtime"].astype(float)
 df["adult"] = df["adult"].astype(bool)
 
-# OpenAI API
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 GENRE_OPTIONS = sorted({g.strip().title()
@@ -46,11 +44,10 @@ MOOD_TO_GENRES = {
 
 SESSIONS = {}
 
-# עזר
 def is_english(text):
     return bool(re.match(r'^[\x00-\x7F\s.,!?\'"-]+$', text))
 
-def detect_intent_gpt(text):
+def detect_intent(text):
     prompt = f"""
 Given this message: "{text}"
 Classify the intent:
@@ -96,25 +93,17 @@ def extract_genre_from_mood(text):
             return random.choice(genres)
     return random.choice(MOOD_TO_GENRES["default"])
 
+def format_score(score):
+    return f"{round(score * 10, 1)}/10"
+
 def format_movie_cards(movie_list):
     cards = []
     for _, row in movie_list.iterrows():
-        title = row["title"]
-        year = int(row["release_year"])
-        genres = row["genres"]
-        runtime = int(row["runtime"])
-        score = round(row["final_score"], 2)
-        overview = row["overview"]
-        poster = row["poster_path"]
-        card = {
-            "title": f"{title} ({year})",
-            "genres": genres,
-            "runtime": runtime,
-            "score": score,
-            "overview": overview,
-            "poster": poster
-        }
-        cards.append(card)
+        cards.append({
+            "title": row["title"],
+            "year": int(row["release_year"]),
+            "score": format_score(row["final_score"])
+        })
     return {"cards": cards}
 
 @app.route("/chat", methods=["POST"])
@@ -131,17 +120,15 @@ def chat():
         SESSIONS[session_id] = {"genre": None, "length": None, "adult": None, "results": None, "pointer": 0}
     session = SESSIONS[session_id]
 
-    # אם המשתמש משנה ז'אנר פתאום
     if user_msg in GENRE_OPTIONS:
         session["genre"] = user_msg
         session["results"] = None
         session["pointer"] = 0
 
-    # intent
-    intent = detect_intent_gpt(user_msg)
+    intent = detect_intent(user_msg)
 
     if intent == "greeting":
-        return jsonify({"response": "👋 Hey! I'm here to help you find the perfect movie. What's your mood or vibe today?"})
+        return jsonify({"response": "👋 Hey! I'm here to help you find the perfect movie. Tell me what you're in the mood for 🎬"})
 
     if intent == "movie_request" and not session["genre"]:
         return jsonify({"response": "[[ASK_GENRE]]"})
@@ -152,7 +139,7 @@ def chat():
         next_batch = session["results"].iloc[start:end]
         session["pointer"] = end
         if next_batch.empty:
-            return jsonify({"response": "🚫 No more results. Try another genre or mood!"})
+            return jsonify({"response": "😕 That’s all I’ve got for now. Try a new genre or mood!"})
         return jsonify(format_movie_cards(next_batch))
 
     if not session["genre"]:
@@ -188,7 +175,6 @@ def chat():
     if session["adult"] is None:
         return jsonify({"response": "[[ASK_ADULT]]"})
 
-    # סינון לפי העדפות
     genre = session["genre"].lower()
     min_len, max_len = LENGTH_OPTIONS[session["length"]]
     is_adult = session["adult"]
@@ -200,7 +186,7 @@ def chat():
     ]
 
     if filtered.empty:
-        return jsonify({"response": "😕 No movies found. Try another genre or mood."})
+        return jsonify({"response": "😕 I couldn’t find anything that matches those filters. Want to try another genre?"})
 
     cluster_id = filtered["cluster_id"].mode().iloc[0]
     result_df = df[(df["cluster_id"] == cluster_id) & df["runtime"].between(min_len, max_len)].copy()
@@ -209,7 +195,8 @@ def chat():
     session["results"] = result_df.reset_index(drop=True)
     session["pointer"] = 5
 
-    return jsonify(format_movie_cards(session["results"].iloc[:5]))
+    intro = f"🍿 Great! Since you're into *{session['genre']}* and prefer *{session['length']}* movies, here are some top picks I think you’ll enjoy:"
+    return jsonify({"response": intro, **format_movie_cards(session["results"].iloc[:5])})
 
 @app.route("/genres", methods=["GET"])
 def get_genres():
