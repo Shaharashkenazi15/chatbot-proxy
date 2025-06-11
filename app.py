@@ -19,9 +19,16 @@ movies_df["genres"] = movies_df["genres"].astype(str)
 movies_df["genre_list"] = movies_df["genres"].apply(lambda x: [g.strip().lower() for g in ast.literal_eval(x)])
 movies_df["runtime"] = movies_df["runtime"].astype(float)
 
-max_score = movies_df["final_score"].max()
-def normalize_score(score):
-    return f"{round((score / max_score) * 10, 1)}/10"
+# דירוג מילולי לפי שלישים
+q33 = movies_df["final_score"].quantile(0.33)
+q66 = movies_df["final_score"].quantile(0.66)
+def rating_level(score):
+    if score >= q66:
+        return "RATING: VERY HIGH!"
+    elif score >= q33:
+        return "RATING: GOOD"
+    else:
+        return "RATING: LOW"
 
 LENGTH_OPTIONS = {
     "Up to 90 minutes": (0, 90),
@@ -62,13 +69,13 @@ def mood_to_genre(mood):
 
 def gpt_analyze(text):
     prompt = f"""
-Given the message: "{text}"
-Classify the intent and extract info:
+Analyze this user message even with grammar issues: "{text}"
+Return JSON with:
 - intent: greeting, movie_request, mood_description, unrelated
-- mood: if relevant (like sad, happy, romantic, angry), else null
+- mood: if relevant (like sad, happy, angry, bored), else null
 - genre: if mentioned (like action, comedy), else null
 - length: "Up to 90 minutes", "Over 90 minutes", "Any length is fine" or null
-Respond in JSON like:
+Format:
 {{"intent": "...", "mood": "...", "genre": "...", "length": "..."}}
 """
     try:
@@ -85,7 +92,7 @@ def format_cards(df, genre=None):
     return [{
         "title": row["title"],
         "year": int(row["release_year"]),
-        "score": normalize_score(row["final_score"]),
+        "score": rating_level(row["final_score"]),
         "genre": genre.title() if genre else row["genre_list"][0].capitalize(),
         "duration": int(row["runtime"])
     } for _, row in df.iterrows()]
@@ -144,21 +151,23 @@ def chat():
     if analysis["intent"] == "greeting":
         return jsonify({"response": "👋 Hey there! What kind of movie are you in the mood for?"})
 
-    # ✅ mood → update genre + mood_message always
+    # Always react to mood (even if genre already set)
     mood = analysis.get("mood")
     if mood:
         new_genre, mood_msg = mood_to_genre(mood)
         if new_genre:
             session["genre"] = new_genre
             session["mood_message"] = mood_msg
-            session["results"] = None  # clear previous results
-            if not session["length"]:
+            session["results"] = None
+            if not session.get("length"):
                 return jsonify({
                     "response": mood_msg,
                     "followup": "[[ASK_LENGTH]]"
                 })
             else:
-                return recommend_movies(session)
+                response = recommend_movies(session).get_json()
+                response["response"] = f"{mood_msg}\n\n{response['response']}"
+                return jsonify(response)
 
     if analysis["genre"]:
         session["genre"] = analysis["genre"].strip().title()
