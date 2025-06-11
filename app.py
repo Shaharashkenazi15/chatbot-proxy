@@ -61,14 +61,14 @@ Respond in JSON like:
         print("GPT Error:", e)
         return {"intent": "unrelated", "mood": None, "genre": None, "length": None}
 
-def format_cards(df):
+def format_cards(df, genre=None):
     cards = []
     for _, row in df.iterrows():
         cards.append({
             "title": row["title"],
             "year": int(row["release_year"]),
             "score": normalize_score(row["final_score"]),
-            "genre": row["genre_list"][0].capitalize() if row["genre_list"] else "Unknown"
+            "genre": genre.title() if genre else row["genre_list"][0].capitalize()
         })
     return cards
 
@@ -88,7 +88,7 @@ def recommend_movies(session):
 
     return jsonify({
         "response": f"🎬 Here are some *{session['genre']}* movies {session['length']}:",
-        "cards": format_cards(session["results"].iloc[:5])
+        "cards": format_cards(session["results"].iloc[:5], genre=session["genre"])
     })
 
 @app.route("/chat", methods=["POST"])
@@ -145,7 +145,10 @@ def more():
     if next_batch.empty:
         return jsonify({"response": "📭 No more movies in this batch."})
 
-    return jsonify({"response": "🎥 Here's more:", "cards": format_cards(next_batch)})
+    return jsonify({
+        "response": "🎥 Here's more:",
+        "cards": format_cards(next_batch, genre=session["genre"])
+    })
 
 @app.route("/summary", methods=["POST"])
 def summary():
@@ -153,7 +156,7 @@ def summary():
     match = movies_df[movies_df["title"].str.lower() == title]
     if match.empty:
         return jsonify({"response": "❌ Sorry, I couldn’t find that movie."})
-    return jsonify({"response": f"📝 *{title.title()}* – {match.iloc[0]['overview']}"})
+    return jsonify({"response": match.iloc[0]['overview']})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
