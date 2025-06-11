@@ -71,6 +71,25 @@ def format_cards(df):
         })
     return cards
 
+def recommend_movies(session):
+    genre = session["genre"].lower()
+    length_range = LENGTH_OPTIONS[session["length"]]
+
+    filtered = movies_df[movies_df["genre_list"].apply(lambda genres: genre in genres)]
+    if length_range:
+        filtered = filtered[filtered["runtime"].between(length_range[0], length_range[1])]
+
+    if filtered.empty:
+        return jsonify({"response": "😕 Couldn't find movies with that combo. Try another mood or genre."})
+
+    session["results"] = filtered.sample(frac=1, random_state=random.randint(1,999)).reset_index(drop=True)
+    session["pointer"] = 5
+
+    return jsonify({
+        "response": f"🎬 Here are some *{session['genre']}* movies {session['length']}:",
+        "cards": format_cards(session["results"].iloc[:5])
+    })
+
 @app.route("/chat", methods=["POST"])
 def chat():
     data = request.get_json()
@@ -91,7 +110,10 @@ def chat():
     analysis = gpt_analyze(user_msg)
 
     if analysis["intent"] == "unrelated":
-        return jsonify({"response": "🤖 I'm here to help with movie recommendations. Tell me your mood or genre!"})
+        if session["genre"] and session["length"]:
+            return recommend_movies(session)
+        else:
+            return jsonify({"response": "🤖 I'm here to help with movie recommendations. Tell me your mood or genre!"})
 
     if analysis["intent"] == "greeting":
         return jsonify({"response": "👋 Hey there! Tell me how you're feeling or what kind of movie you're in the mood for."})
@@ -106,24 +128,7 @@ def chat():
     if not session["length"]:
         return jsonify({"response": "[[ASK_LENGTH]]"})
 
-    # Filter movies
-    genre = session["genre"].lower()
-    length_range = LENGTH_OPTIONS[session["length"]]
-
-    filtered = movies_df[movies_df["genre_list"].apply(lambda genres: genre in genres)]
-    if length_range:
-        filtered = filtered[filtered["runtime"].between(length_range[0], length_range[1])]
-
-    if filtered.empty:
-        return jsonify({"response": "😕 Couldn't find movies with that combo. Try another mood or genre."})
-
-    session["results"] = filtered.sample(frac=1, random_state=random.randint(1,999)).reset_index(drop=True)
-    session["pointer"] = 5
-
-    return jsonify({
-        "response": f"🎬 Here are some *{session['genre']}* movies {session['length']}:",
-        "cards": format_cards(session["results"].iloc[:5])
-    })
+    return recommend_movies(session)
 
 @app.route("/more", methods=["POST"])
 def more():
