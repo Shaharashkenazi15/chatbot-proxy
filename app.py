@@ -33,13 +33,13 @@ SESSIONS = {}
 
 MOOD_GENRE_MAP = {
     "sad": [("Comedy", "A comedy can bring some joy."),
-            ("Fantasy", "Fantasy might help you escape for a while.Now choose the duration :)"),
-            ("Animation", "Animation is often light and uplifting.Now choose the duration :)")],
+            ("Fantasy", "Fantasy might help you escape for a while. Now choose the duration :)"),
+            ("Animation", "Animation is often light and uplifting. Now choose the duration :)")],
     "happy": [("Action", "Action fits your energetic vibe! Now choose the duration :)"),
-              ("Comedy", "Even more laughs for your good mood.Now choose the duration :)")],
-    "angry": [("Thriller", "A thriller can match your intense mood.Now choose the duration :)"),
-              ("Action", "Channel that energy into an action-packed ride.Now choose the duration :)"),
-              ("Crime", "Something gritty might hit the spot.Now choose the duration :)")]
+              ("Comedy", "Even more laughs for your good mood. Now choose the duration :)")],
+    "angry": [("Thriller", "A thriller can match your intense mood. Now choose the duration :)"),
+              ("Action", "Channel that energy into an action-packed ride. Now choose the duration :)"),
+              ("Crime", "Something gritty might hit the spot. Now choose the duration :)")]
 }
 
 def is_english(text):
@@ -82,13 +82,13 @@ Respond in JSON like:
         return {"intent": "unrelated", "mood": None, "genre": None, "length": None}
 
 def format_cards(df, genre=None):
-    return [{
+    return [ {
         "title": row["title"],
         "year": int(row["release_year"]),
         "score": normalize_score(row["final_score"]),
         "genre": genre.title() if genre else row["genre_list"][0].capitalize(),
         "duration": int(row["runtime"])
-    } for _, row in df.iterrows()]
+    } for _, row in df.iterrows() ]
 
 def recommend_movies(session):
     genre = session["genre"].lower()
@@ -96,10 +96,8 @@ def recommend_movies(session):
     filtered = movies_df[movies_df["genre_list"].apply(lambda g: genre in g)]
     if length_range:
         filtered = filtered[filtered["runtime"].between(*length_range)]
-
     if filtered.empty:
         return jsonify({"response": f"😕 No movies found for genre '{genre}' with that length."})
-
     session["results"] = filtered.sample(frac=1).reset_index(drop=True)
     session["pointer"] = 5
     response_text = f"🎬 Here are some *{session['genre']}* movies {session['length']}:"
@@ -146,14 +144,16 @@ def chat():
     if analysis["intent"] == "greeting":
         return jsonify({"response": "👋 Hey there! What kind of movie are you in the mood for?"})
 
-    if not session["genre"]:
-        genre, msg = mood_to_genre(analysis["mood"])
-        if genre:
-            session["genre"] = genre
-            session["mood_message"] = msg
+    # ✅ mood-to-genre אפילו אם כבר יש genre – נעדכן אם שונה
+    mood = analysis.get("mood")
+    if mood:
+        new_genre, mood_msg = mood_to_genre(mood)
+        if new_genre and new_genre.lower() != (session.get("genre") or "").lower():
+            session["genre"] = new_genre
+            session["mood_message"] = mood_msg
             if not session["length"]:
                 return jsonify({
-                    "response": msg,
+                    "response": mood_msg,
                     "followup": "[[ASK_LENGTH]]"
                 })
 
