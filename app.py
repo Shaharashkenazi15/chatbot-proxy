@@ -3,6 +3,7 @@ import pandas as pd
 import openai
 import os
 import random
+import json
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -52,8 +53,10 @@ Respond in JSON like:
             temperature=0,
             messages=[{"role": "user", "content": prompt}]
         )
-        return eval(res.choices[0].message.content)
-    except:
+        content = res.choices[0].message.content.strip()
+        return json.loads(content)
+    except Exception as e:
+        print("GPT Error:", e)
         return {"intent": "unrelated", "mood": None, "genre": None, "length": None}
 
 def format_cards(df):
@@ -84,7 +87,7 @@ def chat():
         return jsonify({"response": "🤖 I'm here to help with movie recommendations. Tell me your mood or genre!"})
 
     if analysis["intent"] == "greeting":
-        return jsonify({"response": "👋 Hi! Tell me how you're feeling or what kind of movie you want."})
+        return jsonify({"response": "👋 Hey there! Tell me how you're feeling or what kind of movie you're in the mood for."})
 
     if analysis["genre"]:
         session["genre"] = analysis["genre"].strip().title()
