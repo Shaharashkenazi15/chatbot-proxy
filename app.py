@@ -20,39 +20,58 @@ movies_df["genres"] = movies_df["genres"].astype(str)
 movies_df["genre_list"] = movies_df["genres"].apply(lambda x: [g.strip().lower() for g in ast.literal_eval(x)])
 movies_df["runtime"] = movies_df["runtime"].astype(float)
 
-# Normalize scores to 6–10
+# Normalize score
 min_score = movies_df["final_score"].min()
 max_score = movies_df["final_score"].max()
 def normalize_score(score):
     norm = (score - min_score) / (max_score - min_score)
     return f"{round(norm * 4 + 6, 1)}/10"
 
-# Length options
 LENGTH_OPTIONS = {
     "Up to 90 minutes": (0, 90),
     "Over 90 minutes": (91, 1000),
     "Any length is fine": None
 }
-GENRE_LIST = sorted(set(g for sublist in movies_df["genre_list"] for g in sublist))
-
+GENRE_LIST = sorted(set(g for sublist in movies_df["genre_list"] for g in sublist if g != "adventure"))
 SESSIONS = {}
 
-# Utility: block non-English messages
+# Map mood to multiple genres + messages
+MOOD_GENRE_MAP = {
+    "sad": [
+        ("Comedy", "A comedy can bring some joy."),
+        ("Fantasy", "Fantasy might help you escape for a while."),
+        ("Animation", "Animation is often light and uplifting.")
+    ],
+    "happy": [
+        ("Action", "Action fits your energetic vibe!"),
+        ("Adventure", "Let’s go on an adventure with you!"),
+        ("Comedy", "Even more laughs for your good mood.")
+    ],
+    "angry": [
+        ("Thriller", "A thriller can match your intense mood."),
+        ("Action", "Channel that energy into an action-packed ride."),
+        ("Crime", "Something gritty might hit the spot.")
+    ]
+}
+
 def is_english(text):
     return all(ord(c) < 128 for c in text)
 
-# Map mood to genre + explanation
+def text_to_length(text):
+    text = text.lower()
+    if any(word in text for word in ["short", "quick", "not long", "under 90", "קצר", "קליל", "רגוע"]):
+        return "Up to 90 minutes"
+    elif any(word in text for word in ["long", "epic", "over 90", "ארוך"]):
+        return "Over 90 minutes"
+    return None
+
 def mood_to_genre(mood):
     mood = (mood or "").lower()
-    if mood == "sad":
-        return "Comedy", "Since you're feeling sad, I think a good comedy might cheer you up!"
-    elif mood == "happy":
-        return "Action", "You're in a good mood! Let's keep the energy up with some action-packed movies."
-    elif mood in {"angry", "mad"}:
-        return "Thriller", "Sounds like you need something intense – how about a thriller?"
+    if mood in MOOD_GENRE_MAP:
+        genre, message = random.choice(MOOD_GENRE_MAP[mood])
+        return genre, f"💡 You seem {mood}. {message}"
     return None, None
 
-# GPT analysis function
 def gpt_analyze(text):
     prompt = f"""
 Given the message: "{text}"
@@ -95,7 +114,6 @@ def recommend_movies(session):
     if length_range:
         filtered = filtered[filtered["runtime"].between(length_range[0], length_range[1])]
 
-    # Debug if empty
     if filtered.empty:
         count = movies_df[movies_df["genre_list"].apply(lambda g: genre in g)].shape[0]
         return jsonify({"response": f"😕 Couldn't find matching movies. There are {count} movies with the genre '{genre}', but none matching your length filter."})
@@ -127,7 +145,7 @@ def chat():
         SESSIONS[session_id] = {"genre": None, "length": None, "results": None, "pointer": 0}
     session = SESSIONS[session_id]
 
-    # Detect if user chose genre/length from buttons
+    # Detect genre or length manually clicked
     if user_msg.lower() in GENRE_LIST:
         session["genre"] = user_msg.title()
         session["mood_message"] = None
@@ -135,6 +153,12 @@ def chat():
         session["length"] = user_msg
 
     analysis = gpt_analyze(user_msg)
+
+    # Fallback: detect length from casual language
+    if not session["length"]:
+        text_length = text_to_length(user_msg)
+        if text_length:
+            session["length"] = text_length
 
     if analysis["intent"] == "unrelated":
         if session["genre"] and session["length"]:
@@ -145,17 +169,17 @@ def chat():
     if analysis["intent"] == "greeting":
         return jsonify({"response": "👋 Hey there! Tell me how you're feeling or what kind of movie you're in the mood for."})
 
-    # Update genre from mood if no genre yet
+    # Apply mood → genre if genre not set
     if not session["genre"]:
         mood_genre, mood_message = mood_to_genre(analysis["mood"])
         if mood_genre:
             session["genre"] = mood_genre
             session["mood_message"] = mood_message
 
-    # Always update genre if user says it explicitly
+    # Override genre if new one provided
     if analysis["genre"]:
         session["genre"] = analysis["genre"].strip().title()
-        session["mood_message"] = None  # cancel previous mood message if user changed genre
+        session["mood_message"] = None
 
     if not session["length"] and analysis["length"] in LENGTH_OPTIONS:
         session["length"] = analysis["length"]
