@@ -37,6 +37,21 @@ GENRE_LIST = sorted(set(g for sublist in movies_df["genre_list"] for g in sublis
 
 SESSIONS = {}
 
+# Utility: block non-English messages
+def is_english(text):
+    return all(ord(c) < 128 for c in text)
+
+# Map mood to genre + explanation
+def mood_to_genre(mood):
+    mood = (mood or "").lower()
+    if mood == "sad":
+        return "Comedy", "Since you're feeling sad, I think a good comedy might cheer you up!"
+    elif mood == "happy":
+        return "Action", "You're in a good mood! Let's keep the energy up with some action-packed movies."
+    elif mood in {"angry", "mad"}:
+        return "Thriller", "Sounds like you need something intense – how about a thriller?"
+    return None, None
+
 # GPT analysis function
 def gpt_analyze(text):
     prompt = f"""
@@ -86,8 +101,13 @@ def recommend_movies(session):
     session["results"] = filtered.sample(frac=1, random_state=random.randint(1,999)).reset_index(drop=True)
     session["pointer"] = 5
 
+    response_text = f"🎬 Here are some *{session['genre']}* movies {session['length']}:"
+    if "mood_message" in session and session["mood_message"]:
+        response_text = f"{session['mood_message']}\n\n" + response_text
+        session["mood_message"] = None
+
     return jsonify({
-        "response": f"🎬 Here are some *{session['genre']}* movies {session['length']}:",
+        "response": response_text,
         "cards": format_cards(session["results"].iloc[:5], genre=session["genre"])
     })
 
@@ -98,11 +118,13 @@ def chat():
     session_id = data.get("session_id", "default")
     user_msg = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "").strip()
 
+    if not is_english(user_msg):
+        return jsonify({"response": "⚠️ Please write in English only."})
+
     if session_id not in SESSIONS:
         SESSIONS[session_id] = {"genre": None, "length": None, "results": None, "pointer": 0}
     session = SESSIONS[session_id]
 
-    # Detect button click genre or length
     if user_msg.lower() in GENRE_LIST:
         session["genre"] = user_msg.title()
     if user_msg in LENGTH_OPTIONS:
@@ -118,6 +140,12 @@ def chat():
 
     if analysis["intent"] == "greeting":
         return jsonify({"response": "👋 Hey there! Tell me how you're feeling or what kind of movie you're in the mood for."})
+
+    if not session["genre"]:
+        mood_genre, mood_message = mood_to_genre(analysis["mood"])
+        if mood_genre:
+            session["genre"] = mood_genre
+            session["mood_message"] = mood_message
 
     if not session["genre"] and analysis["genre"]:
         session["genre"] = analysis["genre"].strip().title()
