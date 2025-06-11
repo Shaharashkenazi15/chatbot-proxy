@@ -18,7 +18,7 @@ df = df[df["runtime"] >= 60]
 if "adult" in df.columns:
     df = df[df["adult"] == False]
 
-# Normalize score
+# Normalize score to show as X.X/10
 min_score = df["final_score"].min()
 max_score = df["final_score"].max()
 def normalize_score(score):
@@ -107,7 +107,7 @@ def chat():
     data = request.get_json()
     messages = data.get("messages", [])
     session_id = data.get("session_id", "default")
-    user_msg = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "").strip()
+    user_msg = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "").strip().lower()
 
     if not is_english(user_msg):
         return jsonify({"response": "❌ English only please."})
@@ -116,15 +116,30 @@ def chat():
         SESSIONS[session_id] = {"genre": None, "length": None, "results": None, "pointer": 0}
     session = SESSIONS[session_id]
 
-    # Detect intent
+    # "More" button
+    if user_msg == "more" and session.get("results") is not None:
+        start = session["pointer"]
+        end = start + 5
+        more_movies = session["results"].iloc[start:end]
+        session["pointer"] = end
+        if more_movies.empty:
+            return jsonify({"response": "🎬 That’s all I got for now – try a different genre or mood?"})
+        return jsonify({
+            "response": "📽️ Here are more picks for you!",
+            **format_movie_cards(more_movies)
+        })
+
+    # Intent detection
     intent = detect_intent(user_msg)
 
     if intent == "unrelated":
         return jsonify({"response": "🤖 I'm here to help with movie recommendations – tell me what you're in the mood for!"})
 
-    if intent == "greeting" or "happy" in user_msg.lower():
+    if intent == "greeting" or "happy" in user_msg:
         return jsonify({"response": "😄 So good to hear! Let’s find something fun to match your mood. What kind of movie or length are you in the mood for?"})
 
+    # Mood handling
+    intro = None
     if intent == "mood_description":
         guessed_genre = guess_genre_from_mood(user_msg)
         if guessed_genre:
@@ -134,21 +149,20 @@ def chat():
         else:
             return jsonify({"response": "🎭 Tell me what genre you're in the mood for – I’ll match it with a movie!"})
     else:
-        # Classify genre from message
+        # Try to classify genre and length if not already defined
         if not session["genre"]:
             g = classify(user_msg, "genre")
             if g in GENRE_OPTIONS:
                 session["genre"] = g
 
-        # Classify length from message
         if not session["length"]:
             l = classify(user_msg, "length")
             if l in LENGTH_OPTIONS:
                 session["length"] = l
 
-    # Handle button clicks
-    if user_msg in GENRE_OPTIONS:
-        session["genre"] = user_msg
+    # Handle buttons
+    if user_msg.title() in GENRE_OPTIONS:
+        session["genre"] = user_msg.title()
     elif user_msg in LENGTH_OPTIONS:
         session["length"] = user_msg
 
@@ -158,7 +172,7 @@ def chat():
     if not session["length"]:
         return jsonify({"response": "[[ASK_LENGTH]]"})
 
-    # Filter movies
+    # Filter results
     genre = session["genre"].lower()
     length_range = LENGTH_OPTIONS[session["length"]]
 
@@ -175,8 +189,7 @@ def chat():
     session["results"] = result_df.reset_index(drop=True)
     session["pointer"] = 5
 
-    if 'intro' not in locals():
-        intro = f"🎥 Based on your choice – *{session['genre']}*, {session['length']} – here are some great picks:"
+    intro = intro if intro else f"🎥 Based on your choice – *{session['genre']}*, {session['length']} – here are some great picks:"
 
     return jsonify({"response": intro, **format_movie_cards(session["results"].iloc[:5])})
 
