@@ -141,7 +141,7 @@ def chat():
     guessed = text_to_length(user_msg)
     analysis = gpt_analyze(user_msg)
 
-    if analysis["intent"] == "unrelated":
+    if analysis["intent"] == "unrelated" and not session["genres"]:
         return jsonify({"response": "🤔 That doesn't seem related to movies. Try telling me how you're feeling or a genre you like!", "typing": False})
 
     mood = (analysis["mood"] or "").lower()
