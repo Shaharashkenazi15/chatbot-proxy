@@ -2,7 +2,6 @@ from flask import Flask, request, jsonify
 import pandas as pd
 import openai
 import os
-import random
 import json
 import ast
 from flask_cors import CORS
@@ -28,19 +27,17 @@ def rating_label(score):
     elif score >= quantiles[0.5]:
         return ("RATING: HIGH", "darkgreen")
     elif score >= quantiles[0.25]:
-        return ("RATING: GOOD", "orange")  # Changed from yellow to orange
+        return ("RATING: GOOD", "orange")
     else:
         return ("RATING: NICE", "lightcoral")
 
-# Length options
+# Options
 LENGTH_OPTIONS = {
     "Up to 90 minutes": (0, 90),
     "Over 90 minutes": (91, 1000),
     "Any length is fine": None
 }
 GENRE_LIST = sorted(set(g for sublist in movies_df["genre_list"] for g in sublist if g != "adventure"))
-
-# Moods and matching genres
 MOOD_GENRE_MAP = {
     "sad": ["comedy", "fantasy", "animation"],
     "happy": ["action", "comedy", "adventure"],
@@ -49,13 +46,7 @@ MOOD_GENRE_MAP = {
     "bored": ["mystery", "adventure", "fantasy"],
     "excited": ["sci-fi", "action", "adventure"]
 }
-
-MOOD_ALIAS = {
-    "mad": "angry",
-    "furious": "angry",
-    "glad": "happy"
-}
-
+MOOD_ALIAS = {"mad": "angry", "furious": "angry", "glad": "happy"}
 SESSIONS = {}
 
 # Helpers
@@ -95,7 +86,6 @@ def format_cards(df, session):
     cards = []
     for _, row in df.iterrows():
         label, color = rating_label(row["final_score"])
-        # Prefer showing the genre that user selected, else fallback to first
         chosen_genre = next((g.capitalize() for g in session["genres"] if g in row["genre_list"]), row["genre_list"][0].capitalize())
         cards.append({
             "title": row["title"],
@@ -114,12 +104,13 @@ def recommend_movies(session):
     if length_range:
         filtered = filtered[filtered["runtime"].between(*length_range)]
     if filtered.empty:
-        return jsonify({"response": "😕 No movies found for that mood and length."})
+        return jsonify({"response": "😕 No movies found for that mood and length.", "typing": False})
     session["results"] = filtered.sample(frac=1).reset_index(drop=True)
     session["pointer"] = 5
     return jsonify({
         "response": "🎬 Here are a few movies we think you'll enjoy:",
-        "cards": format_cards(session["results"].iloc[:5], session)
+        "cards": format_cards(session["results"].iloc[:5], session),
+        "typing": False
     })
 
 @app.route("/chat", methods=["POST"])
@@ -130,7 +121,7 @@ def chat():
     user_msg = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "").strip()
 
     if not is_english(user_msg):
-        return jsonify({"response": "⚠️ Please write in English only."})
+        return jsonify({"response": "⚠️ Please write in English only.", "typing": False})
 
     if session_id not in SESSIONS:
         SESSIONS[session_id] = {"genres": None, "length": None, "results": None, "pointer": 0}
@@ -141,18 +132,15 @@ def chat():
         session["length"] = None
         session["results"] = None
         session["pointer"] = 0
-        return jsonify({"response": "[[ASK_GENRE]]"})
+        return jsonify({"response": "[[ASK_GENRE]]", "typing": False})
 
     if user_msg.lower() in GENRE_LIST:
         session["genres"] = [user_msg.lower()]
-        session["length"] = None
-        return jsonify({"response": "[[ASK_LENGTH]]"})
+        if session["length"]:
+            return recommend_movies(session)
+        return jsonify({"response": "[[ASK_LENGTH]]", "typing": False})
 
-    # Guess length from text first
     guessed = text_to_length(user_msg)
-    if guessed:
-        session["length"] = guessed
-
     analysis = gpt_analyze(user_msg)
 
     mood = (analysis["mood"] or "").lower()
@@ -164,24 +152,30 @@ def chat():
         session["length"] = None
         return jsonify({
             "response": f"💡 Feeling {mood}? Let's find you something great! 🎬\nChoose the duration for your movie below 👇",
-            "followup": "[[ASK_LENGTH]]"
+            "followup": "[[ASK_LENGTH]]",
+            "typing": False
         })
 
     if analysis["genre"]:
         session["genres"] = [analysis["genre"].lower()]
-        session["length"] = None
-        return jsonify({"response": "[[ASK_LENGTH]]"})
+        if session["length"] or guessed:
+            session["length"] = session["length"] or guessed
+            return recommend_movies(session)
+        return jsonify({"response": "[[ASK_LENGTH]]", "typing": False})
 
-    if analysis["length"] and not session["length"]:
-        session["length"] = analysis["length"]
+    if not session["length"]:
+        session["length"] = analysis["length"] or guessed
 
     if analysis["intent"] == "greeting":
-        return jsonify({"response": "👋 Hey there! Tell me how you're feeling or what kind of movie you're in the mood for."})
+        return jsonify({
+            "response": "👋 Hey there! Tell me how you're feeling or what kind of movie you're in the mood for.",
+            "typing": False
+        })
 
     if not session["genres"]:
-        return jsonify({"response": "[[ASK_GENRE]]"})
+        return jsonify({"response": "[[ASK_GENRE]]", "typing": False})
     if not session["length"]:
-        return jsonify({"response": "[[ASK_LENGTH]]"})
+        return jsonify({"response": "[[ASK_LENGTH]]", "typing": False})
 
     return recommend_movies(session)
 
@@ -190,15 +184,16 @@ def more():
     session_id = request.get_json().get("session_id", "default")
     session = SESSIONS.get(session_id)
     if not session or session.get("results") is None:
-        return jsonify({"response": "❌ No session found."})
+        return jsonify({"response": "❌ No session found.", "typing": False})
     start, end = session["pointer"], session["pointer"] + 5
     batch = session["results"].iloc[start:end]
     session["pointer"] = end
     if batch.empty:
-        return jsonify({"response": "📭 No more movies!"})
+        return jsonify({"response": "📭 No more movies!", "typing": False})
     return jsonify({
         "response": "🎥 Here's more:",
-        "cards": format_cards(batch, session)
+        "cards": format_cards(batch, session),
+        "typing": False
     })
 
 @app.route("/summary", methods=["POST"])
@@ -206,8 +201,8 @@ def summary():
     title = request.get_json().get("title", "").lower()
     match = movies_df[movies_df["title"].str.lower() == title]
     if match.empty:
-        return jsonify({"response": "❌ Couldn't find that movie."})
-    return jsonify({"response": match.iloc[0]["overview"]})
+        return jsonify({"response": "❌ Couldn't find that movie.", "typing": False})
+    return jsonify({"response": match.iloc[0]["overview"], "typing": False})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
