@@ -4,6 +4,7 @@ import openai
 import os
 import json
 import ast
+import re
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -19,7 +20,6 @@ movies_df["genres"] = movies_df["genres"].astype(str)
 movies_df["genre_list"] = movies_df["genres"].apply(lambda x: [g.strip().lower() for g in ast.literal_eval(x)])
 movies_df["runtime"] = movies_df["runtime"].astype(float)
 
-# RATING by quartiles
 quantiles = movies_df["final_score"].quantile([0.25, 0.5, 0.75])
 def rating_label(score):
     if score >= quantiles[0.75]:
@@ -31,7 +31,6 @@ def rating_label(score):
     else:
         return ("RATING: NICE", "lightcoral")
 
-# Options
 LENGTH_OPTIONS = {
     "Up to 90 minutes": (0, 90),
     "Over 90 minutes": (91, 1000),
@@ -49,7 +48,6 @@ MOOD_GENRE_MAP = {
 MOOD_ALIAS = {"mad": "angry", "furious": "angry", "glad": "happy"}
 SESSIONS = {}
 
-# Helpers
 def is_english(text):
     return all(ord(c) < 128 for c in text)
 
@@ -60,6 +58,19 @@ def text_to_length(text):
     if any(w in text for w in ["long", "epic", "over 90"]):
         return "Over 90 minutes"
     return None
+
+def looks_like_gibberish(text):
+    text = text.lower().strip()
+    if len(text) < 3:
+        return True
+    words = text.split()
+    gibberish_count = 0
+    for word in words:
+        if len(word) > 15 or re.search(r"[^a-z]", word):
+            gibberish_count += 1
+        elif re.search(r"(.)\1{2,}", word):
+            gibberish_count += 1
+    return gibberish_count / len(words) > 0.5
 
 def gpt_analyze(text):
     prompt = f"""
@@ -123,15 +134,15 @@ def chat():
     if not is_english(user_msg):
         return jsonify({"response": "⚠️ Please write in English only.", "typing": False})
 
+    if looks_like_gibberish(user_msg):
+        return jsonify({"response": "🤔 Hmm... That doesn't look like a request I can understand. Try telling me how you're feeling or a genre you like!", "typing": False})
+
     if session_id not in SESSIONS:
         SESSIONS[session_id] = {"genres": None, "length": None, "results": None, "pointer": 0}
     session = SESSIONS[session_id]
 
     if any(kw in user_msg.lower() for kw in ["something else", "another option", "change it", "different movie"]):
-        session["genres"] = None
-        session["length"] = None
-        session["results"] = None
-        session["pointer"] = 0
+        session.update({"genres": None, "length": None, "results": None, "pointer": 0})
         return jsonify({"response": "[[ASK_GENRE]]", "typing": False})
 
     if user_msg.lower() in GENRE_LIST:
@@ -142,6 +153,9 @@ def chat():
 
     guessed = text_to_length(user_msg)
     analysis = gpt_analyze(user_msg)
+
+    if analysis["intent"] == "unrelated":
+        return jsonify({"response": "🤔 I didn’t quite get that. Try describing your mood or a movie genre you enjoy.", "typing": False})
 
     mood = (analysis["mood"] or "").lower()
     if mood in MOOD_ALIAS:
