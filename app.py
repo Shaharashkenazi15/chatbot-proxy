@@ -4,6 +4,7 @@ import openai
 import os
 import json
 import ast
+import re
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -128,10 +129,7 @@ def chat():
     session = SESSIONS[session_id]
 
     if any(kw in user_msg.lower() for kw in ["something else", "another option", "change it", "different movie"]):
-        session["genres"] = None
-        session["length"] = None
-        session["results"] = None
-        session["pointer"] = 0
+        session.update({"genres": None, "length": None, "results": None, "pointer": 0})
         return jsonify({"response": "[[ASK_GENRE]]", "typing": False})
 
     if user_msg.lower() in GENRE_LIST:
@@ -142,6 +140,9 @@ def chat():
 
     guessed = text_to_length(user_msg)
     analysis = gpt_analyze(user_msg)
+
+    if analysis["intent"] == "unrelated":
+        return jsonify({"response": "🤔 That doesn't seem related to movies. Try telling me how you're feeling or a genre you like!", "typing": False})
 
     mood = (analysis["mood"] or "").lower()
     if mood in MOOD_ALIAS:
