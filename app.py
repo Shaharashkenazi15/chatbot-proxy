@@ -91,15 +91,17 @@ Respond in JSON like:
     except:
         return {"intent": "unrelated", "mood": None, "genre": None, "length": None}
 
-def format_cards(df):
+def format_cards(df, session):
     cards = []
     for _, row in df.iterrows():
         label, color = rating_label(row["final_score"])
+        # Prefer showing the genre that user selected, else fallback to first
+        chosen_genre = next((g.capitalize() for g in session["genres"] if g in row["genre_list"]), row["genre_list"][0].capitalize())
         cards.append({
             "title": row["title"],
             "year": int(row["release_year"]),
             "score": label,
-            "genre": ", ".join([g.capitalize() for g in row["genre_list"]]),  # show all genres
+            "genre": chosen_genre,
             "duration": int(row["runtime"]),
             "color": color
         })
@@ -117,7 +119,7 @@ def recommend_movies(session):
     session["pointer"] = 5
     return jsonify({
         "response": "🎬 Here are a few movies we think you'll enjoy:",
-        "cards": format_cards(session["results"].iloc[:5])
+        "cards": format_cards(session["results"].iloc[:5], session)
     })
 
 @app.route("/chat", methods=["POST"])
@@ -142,23 +144,16 @@ def chat():
         return jsonify({"response": "[[ASK_GENRE]]"})
 
     if user_msg.lower() in GENRE_LIST:
-        session["genres"] = [user_msg.lower()]  # always a list of one genre
+        session["genres"] = [user_msg.lower()]
         session["length"] = None
         return jsonify({"response": "[[ASK_LENGTH]]"})
 
-    # 🔥 FIX: match all length options without case sensitivity
-    for k in LENGTH_OPTIONS:
-        if user_msg.lower().strip() == k.lower():
-            session["length"] = k
-            if session["genres"]:
-                return recommend_movies(session)
+    # Guess length from text first
+    guessed = text_to_length(user_msg)
+    if guessed:
+        session["length"] = guessed
 
     analysis = gpt_analyze(user_msg)
-
-    if not session["length"]:
-        guessed = text_to_length(user_msg)
-        if guessed:
-            session["length"] = guessed
 
     mood = (analysis["mood"] or "").lower()
     if mood in MOOD_ALIAS:
@@ -173,9 +168,12 @@ def chat():
         })
 
     if analysis["genre"]:
-        session["genres"] = [analysis["genre"].lower()]  # force as list
+        session["genres"] = [analysis["genre"].lower()]
         session["length"] = None
         return jsonify({"response": "[[ASK_LENGTH]]"})
+
+    if analysis["length"] and not session["length"]:
+        session["length"] = analysis["length"]
 
     if analysis["intent"] == "greeting":
         return jsonify({"response": "👋 Hey there! Tell me how you're feeling or what kind of movie you're in the mood for."})
@@ -200,7 +198,7 @@ def more():
         return jsonify({"response": "📭 No more movies!"})
     return jsonify({
         "response": "🎥 Here's more:",
-        "cards": format_cards(batch)
+        "cards": format_cards(batch, session)
     })
 
 @app.route("/summary", methods=["POST"])
