@@ -122,7 +122,7 @@ def chat():
     user_msg = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "").strip()
 
     if not is_english(user_msg):
-        return jsonify({"response": "⚠️ Please write in English only.", "typing": False})
+        return jsonify({"response": "🎥 Oops! My script only works in English – like most Hollywood blockbusters. Try again in English!🍿", "typing": False})
 
     if session_id not in SESSIONS:
         SESSIONS[session_id] = {"genres": None, "length": None, "results": None, "pointer": 0}
