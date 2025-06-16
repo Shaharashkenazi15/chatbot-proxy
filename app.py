@@ -206,10 +206,10 @@ def summary():
     
     overview = match.iloc[0]["overview"]
     poster = match.iloc[0].get("poster_path", "")
-    
-    if poster:
-        overview += f"\n\n🔗 [More information]({poster})"
-    
+
+    if poster and poster.startswith("http"):
+        overview += f'<br><br>🔗 <a href="{poster}" target="_blank" rel="noopener">More information</a>'
+
     return jsonify({"response": overview, "typing": False})
 
 if __name__ == "__main__":
