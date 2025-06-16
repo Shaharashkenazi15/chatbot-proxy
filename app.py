@@ -199,18 +199,18 @@ def more():
 
 @app.route("/summary", methods=["POST"])
 def summary():
-    title = request.get_json().get("title", "").lower()
-    match = movies_df[movies_df["title"].str.lower() == title]
+    title = request.get_json().get("title", "").strip()
+    match = movies_df[movies_df["title"].str.lower() == title.lower()]
     if match.empty:
         return jsonify({"response": "❌ Couldn't find that movie.", "typing": False})
     
     overview = match.iloc[0]["overview"]
-    poster = match.iloc[0].get("poster_path", "")
+    query = title.replace(" ", "+")
+    google_link = f"https://www.google.com/search?q={query}+movie"
 
-    if poster and poster.startswith("http"):
-        overview += f'<br><br>🔗 <a href="{poster}" target="_blank" rel="noopener">More information</a>'
-
+    overview += f'<br><br>🔗 <a href="{google_link}" target="_blank" rel="noopener">More information</a>'
     return jsonify({"response": overview, "typing": False})
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
