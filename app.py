@@ -203,7 +203,14 @@ def summary():
     match = movies_df[movies_df["title"].str.lower() == title]
     if match.empty:
         return jsonify({"response": "❌ Couldn't find that movie.", "typing": False})
-    return jsonify({"response": match.iloc[0]["overview"], "typing": False})
+    
+    overview = match.iloc[0]["overview"]
+    poster = match.iloc[0].get("poster_path", "")
+    
+    if poster:
+        overview += f"\n\n🔗 [More information]({poster})"
+    
+    return jsonify({"response": overview, "typing": False})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
